@@ -13,11 +13,11 @@ pub fn main() !void {
     const tmp_path = try tmp.dir.realpathAlloc(alloc, ".");
     defer alloc.free(tmp_path);
 
-    const tmp_filename = "tmp";
+    const tmp_filename = "headers";
     const tmp_file_path = try fs.path.join(alloc, &[_][]const u8{ tmp_path, tmp_filename });
     defer alloc.free(tmp_file_path);
 
-    const headers_list_filename = "upgrade.o.d";
+    const headers_list_filename = "headers.o.d";
     const headers_list_path = try fs.path.join(alloc, &[_][]const u8{ tmp_path, headers_list_filename });
     defer alloc.free(headers_list_path);
 
@@ -25,7 +25,7 @@ pub fn main() !void {
     // hook in directly to `zig cc` API.
     const res = try std.ChildProcess.exec(.{
         .allocator = alloc,
-        .argv = &[_][]const u8{ "cc", "-o", tmp_file_path, "src/upgrade.c", "-MD", "-MV", "-MF", headers_list_path },
+        .argv = &[_][]const u8{ "cc", "-o", tmp_file_path, "src/headers.c", "-MD", "-MV", "-MF", headers_list_path },
     });
     defer {
         alloc.free(res.stdout);
