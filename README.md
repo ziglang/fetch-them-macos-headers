@@ -6,7 +6,7 @@ with [Zig], and used when cross-compiling to macOS (see [this article] for an am
 C compiler frontend).
 
 [here]: https://en.wikipedia.org/wiki/C_standard_library
-[Zig]: https://www.ziglang.org
+[Zig]: https://ziglang.org
 [this article]: https://andrewkelley.me/post/zig-cc-powerful-drop-in-replacement-gcc-clang.html
 
 ## Howto
