@@ -138,6 +138,7 @@
 #include <libkern/OSAtomic.h>
 #include <libkern/OSTypes.h>
 #include <MacTypes.h>
+#include <objc/message.h>
 #include <objc/NSObject.h>
 #include <objc/NSObjCRuntime.h>
 #include <objc/objc.h>
