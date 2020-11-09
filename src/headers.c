@@ -111,6 +111,10 @@
 #include <wctype.h>
 #include <wordexp.h>
 
+// Depended on by libcxx
+#include <Block.h>
+#include <xlocale.h>
+
 int main(int argc, char **argv) {
     return 0;
 }
