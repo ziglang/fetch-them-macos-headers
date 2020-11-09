@@ -121,6 +121,7 @@
 
 // Depended on by LLVM
 #include <sysexits.h>
+#include <mach/clock.h>
 #include <mach/mach.h>
 #include <sys/attr.h>
 #include <sys/mount.h>
