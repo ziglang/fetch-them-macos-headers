@@ -116,6 +116,7 @@
 #include <xlocale.h>
 #include <copyfile.h>
 #include <mach-o/dyld.h>
+#include <sys/param.h>
 
 int main(int argc, char **argv) {
     return 0;
