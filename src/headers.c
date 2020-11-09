@@ -114,6 +114,7 @@
 // Depended on by libcxx
 #include <Block.h>
 #include <xlocale.h>
+#include <copyfile.h>
 
 int main(int argc, char **argv) {
     return 0;
