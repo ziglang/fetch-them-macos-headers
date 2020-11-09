@@ -31,6 +31,9 @@ pub fn main() !void {
         alloc.free(res.stdout);
         alloc.free(res.stderr);
     }
+    if (res.stderr.len != 0) {
+        std.debug.print("{}\n", .{res.stderr});
+    }
 
     // Read in the contents of `upgrade.o.d`
     const headers_list_file = try tmp.dir.openFile(headers_list_filename, .{});

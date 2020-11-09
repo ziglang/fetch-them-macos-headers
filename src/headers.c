@@ -54,7 +54,7 @@
 #include <locale.h>
 #include <math.h>
 #include <monetary.h>
-#include <mqueue.h>
+/* #include <mqueue.h> - not found on macos catalina */
 #include <ndbm.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -79,7 +79,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <stropts.h>
+/* #include <stropts.h> - not found on macos catalina */
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/msg.h>
@@ -102,7 +102,7 @@
 #include <termios.h>
 #include <tgmath.h>
 #include <time.h>
-#include <trace.h>
+/* #include <trace.h> - not found on macos catalina */
 #include <ulimit.h>
 #include <unistd.h>
 #include <utime.h>
