@@ -7,6 +7,8 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const alloc = &gpa.allocator;
 
 pub fn main() !void {
+    const args = try std.process.argsAlloc(std.heap.page_allocator);
+
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
@@ -21,15 +23,31 @@ pub fn main() !void {
     const headers_list_path = try fs.path.join(alloc, &[_][]const u8{ tmp_path, headers_list_filename });
     defer alloc.free(headers_list_path);
 
+    var argv = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    try argv.appendSlice(&[_][]const u8{
+        "cc",
+        "-o",
+        tmp_file_path,
+        "src/headers.c",
+        "-MD",
+        "-MV",
+        "-MF",
+        headers_list_path,
+    });
+    try argv.appendSlice(args[1..]);
+
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
     const res = try std.ChildProcess.exec(.{
         .allocator = alloc,
-        .argv = &[_][]const u8{ "cc", "-o", tmp_file_path, "src/headers.c", "-MD", "-MV", "-MF", headers_list_path },
+        .argv = argv.items,
     });
     defer {
         alloc.free(res.stdout);
         alloc.free(res.stderr);
+    }
+    if (res.stderr.len != 0) {
+        std.debug.print("{}\n", .{res.stderr});
     }
 
     // Read in the contents of `upgrade.o.d`

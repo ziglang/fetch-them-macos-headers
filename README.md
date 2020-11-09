@@ -22,6 +22,7 @@ Running the generated binary `fetch_them_macos_headers` will create a new dir `x
 libc headers copied over
 
 ```
-zig-cache/bin/fetch_them_macos_headers
+zig-cache/bin/fetch_them_macos_headers [cflags]
 ```
 
+Currently there are no known cflags needed.
