@@ -128,6 +128,24 @@
 #include <crt_externs.h>
 #include <execinfo.h>
 
+// Depended on by several frameworks
+#include <AssertMacros.h>
+#include <device/device_types.h>
+#include <dispatch/dispatch.h>
+#include <hfs/hfs_format.h>
+#include <hfs/hfs_unistr.h>
+#include <libDER/DERItem.h>
+#include <libkern/OSAtomic.h>
+#include <libkern/OSTypes.h>
+#include <MacTypes.h>
+#include <objc/NSObject.h>
+#include <objc/NSObjCRuntime.h>
+#include <objc/objc.h>
+#include <os/lock.h>
+#include <simd/simd.h>
+#include <sys/acl.h>
+#include <xpc/xpc.h>
+
 int main(int argc, char **argv) {
     return 0;
 }
