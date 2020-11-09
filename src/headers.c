@@ -115,6 +115,7 @@
 #include <Block.h>
 #include <xlocale.h>
 #include <copyfile.h>
+#include <mach-o/dyld.h>
 
 int main(int argc, char **argv) {
     return 0;
