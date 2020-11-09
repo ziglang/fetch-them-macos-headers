@@ -119,6 +119,14 @@
 #include <sys/param.h>
 #include <sys/sysctl.h>
 
+// Depended on by LLVM
+#include <sysexits.h>
+#include <mach/mach.h>
+#include <sys/attr.h>
+#include <sys/mount.h>
+#include <crt_externs.h>
+#include <execinfo.h>
+
 int main(int argc, char **argv) {
     return 0;
 }
