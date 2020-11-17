@@ -111,6 +111,11 @@
 #include <wctype.h>
 #include <wordexp.h>
 
+// macOS system headers
+#include <mach/clock.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+
 // Depended on by libcxx
 #include <Block.h>
 #include <xlocale.h>
@@ -121,8 +126,6 @@
 
 // Depended on by LLVM
 #include <sysexits.h>
-#include <mach/clock.h>
-#include <mach/mach.h>
 #include <sys/attr.h>
 #include <sys/mount.h>
 #include <crt_externs.h>
@@ -134,7 +137,6 @@
 #include <dispatch/dispatch.h>
 #include <hfs/hfs_format.h>
 #include <hfs/hfs_unistr.h>
-#include <libDER/DERItem.h>
 #include <libkern/OSAtomic.h>
 #include <libkern/OSTypes.h>
 #include <MacTypes.h>
