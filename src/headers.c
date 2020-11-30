@@ -115,19 +115,21 @@
 #include <mach/clock.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <sys/acl.h>
+#include <sys/attr.h>
+#include <sys/ioctl.h>
+#include <sys/mount.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 
 // Depended on by libcxx
 #include <Block.h>
 #include <xlocale.h>
 #include <copyfile.h>
 #include <mach-o/dyld.h>
-#include <sys/param.h>
-#include <sys/sysctl.h>
 
 // Depended on by LLVM
 #include <sysexits.h>
-#include <sys/attr.h>
-#include <sys/mount.h>
 #include <crt_externs.h>
 #include <execinfo.h>
 
@@ -146,8 +148,11 @@
 #include <objc/objc.h>
 #include <os/lock.h>
 #include <simd/simd.h>
-#include <sys/acl.h>
 #include <xpc/xpc.h>
+
+// Depended on by libuv
+#include <ifaddrs.h>
+#include <net/if_dl.h>
 
 // Provided by macOS LibC
 #include <memory.h>
