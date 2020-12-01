@@ -154,6 +154,10 @@
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 
+// Depended on by sqlite-amalgamation
+#include <sys/file.h>
+#include <malloc/malloc.h>
+
 // Provided by macOS LibC
 #include <memory.h>
 
