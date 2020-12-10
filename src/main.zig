@@ -1,27 +1,63 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const fs = std.fs;
+const io = std.io;
 const mem = std.mem;
 const tmpDir = std.testing.tmpDir;
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const alloc = &gpa.allocator;
+var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+const gpa = &general_purpose_allocator.allocator;
+const Allocator = mem.Allocator;
 
-pub fn main() !void {
-    const args = try std.process.argsAlloc(std.heap.page_allocator);
+const usage =
+    \\Usage: fetch_them_macos_headers [cflags]
+    \\       fetch_them_macos_headers install [destination]
+    \\
+    \\Commands:
+    \\  <empty> [cflags] (default)  Fetch macOS libc headers into <arch>-macos-gnu local directory
+    \\  install [destination]       Install <arch>-macos-gnu header directory into a given destination path
+    \\
+    \\General Options:
+    \\-h, --help                    Print this help and exit
+;
 
+const out_path = switch (builtin.arch) {
+    .x86_64 => "x86_64",
+    .aarch64 => "aarch64",
+    else => unreachable,
+} ++ "-macos-gnu";
+
+fn mainArgs(all_args: []const []const u8) !void {
+    const args = all_args[1..];
+    if (args.len > 0) {
+        const first_arg = args[0];
+        if (mem.eql(u8, first_arg, "--help") or mem.eql(u8, first_arg, "-h")) {
+            try io.getStdOut().writeAll(usage);
+            return;
+        } else if (mem.eql(u8, first_arg, "install")) {
+            return installHeaders(args[1..]);
+        } else {
+            return fetchHeaders(args[1..]);
+        }
+    } else {
+        return fetchHeaders(args);
+    }
+}
+
+fn fetchHeaders(args: []const []const u8) !void {
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
-    const tmp_path = try tmp.dir.realpathAlloc(alloc, ".");
-    defer alloc.free(tmp_path);
+    const tmp_path = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(tmp_path);
 
     const tmp_filename = "headers";
-    const tmp_file_path = try fs.path.join(alloc, &[_][]const u8{ tmp_path, tmp_filename });
-    defer alloc.free(tmp_file_path);
+    const tmp_file_path = try fs.path.join(gpa, &[_][]const u8{ tmp_path, tmp_filename });
+    defer gpa.free(tmp_file_path);
 
     const headers_list_filename = "headers.o.d";
-    const headers_list_path = try fs.path.join(alloc, &[_][]const u8{ tmp_path, headers_list_filename });
-    defer alloc.free(headers_list_path);
+    const headers_list_path = try fs.path.join(gpa, &[_][]const u8{ tmp_path, headers_list_filename });
+    defer gpa.free(headers_list_path);
 
     var argv = std.ArrayList([]const u8).init(std.heap.page_allocator);
     try argv.appendSlice(&[_][]const u8{
@@ -34,17 +70,17 @@ pub fn main() !void {
         "-MF",
         headers_list_path,
     });
-    try argv.appendSlice(args[1..]);
+    try argv.appendSlice(args);
 
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
     const res = try std.ChildProcess.exec(.{
-        .allocator = alloc,
+        .allocator = gpa,
         .argv = argv.items,
     });
     defer {
-        alloc.free(res.stdout);
-        alloc.free(res.stderr);
+        gpa.free(res.stdout);
+        gpa.free(res.stderr);
     }
     if (res.stderr.len != 0) {
         std.debug.print("{}\n", .{res.stderr});
@@ -55,14 +91,15 @@ pub fn main() !void {
     defer headers_list_file.close();
 
     // Create out dir
-    var out_dir = try fs.cwd().makeOpenPath("x86_64-macos-gnu", .{});
-    var dirs = std.StringHashMap(fs.Dir).init(alloc);
+    var out_dir = try fs.cwd().makeOpenPath(out_path, .{});
+    var dirs = std.StringHashMap(fs.Dir).init(gpa);
     defer dirs.deinit();
     try dirs.putNoClobber(".", out_dir);
 
-    const headers_list_str = try headers_list_file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
-    defer alloc.free(headers_list_str);
+    const headers_list_str = try headers_list_file.reader().readAllAlloc(gpa, std.math.maxInt(usize));
+    defer gpa.free(headers_list_str);
     const prefix = "/usr/include";
+
     var it = mem.split(headers_list_str, "\n");
     while (it.next()) |line| {
         if (mem.lastIndexOf(u8, line, "clang") != null) continue;
@@ -89,4 +126,11 @@ pub fn main() !void {
     while (dir_it.next()) |entry| {
         entry.value.close();
     }
+}
+
+fn installHeaders(args: []const []const u8) !void {}
+
+pub fn main() anyerror!void {
+    const args = try std.process.argsAlloc(std.heap.page_allocator);
+    return mainArgs(args);
 }
