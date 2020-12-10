@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const fs = std.fs;
 const io = std.io;
 const mem = std.mem;
+const process = std.process;
+const assert = std.debug.assert;
 const tmpDir = std.testing.tmpDir;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -21,11 +23,7 @@ const usage =
     \\-h, --help                    Print this help and exit
 ;
 
-const out_path = switch (builtin.arch) {
-    .x86_64 => "x86_64",
-    .aarch64 => "aarch64",
-    else => unreachable,
-} ++ "-macos-gnu";
+const out_path = @tagName(builtin.arch) ++ "-macos-gnu";
 
 fn mainArgs(all_args: []const []const u8) !void {
     const args = all_args[1..];
@@ -128,7 +126,69 @@ fn fetchHeaders(args: []const []const u8) !void {
     }
 }
 
-fn installHeaders(args: []const []const u8) !void {}
+fn installHeaders(args: []const []const u8) !void {
+    if (args.len < 1) {
+        try io.getStdErr().writeAll("install: no destination path specified");
+        process.exit(1);
+    }
+
+    var source_dir = fs.cwd().openDir(out_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            const msg = try std.fmt.allocPrint(gpa, "install: source path '{}' not found; did you forget to run `fetch_them_macos_headers` first?", .{out_path});
+            try io.getStdErr().writeAll(msg);
+            process.exit(1);
+        },
+        else => return err,
+    };
+    defer source_dir.close();
+
+    const dest_path = args[0];
+    var dest_dir = fs.cwd().openDir(dest_path, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => {
+            const msg = try std.fmt.allocPrint(gpa, "install: destination path '{}' not found or not a directory", .{dest_path});
+            try io.getStdErr().writeAll(msg);
+            process.exit(1);
+        },
+        else => return err,
+    };
+    defer dest_dir.close();
+
+    var dest_sub_path = try dest_dir.makeOpenPath(out_path, .{});
+    defer dest_sub_path.close();
+
+    try copyDirAll(source_dir, dest_sub_path);
+}
+
+fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
+    var it = source.iterate();
+    while (try it.next()) |next| {
+        switch (next.kind) {
+            .Directory => {
+                var sub_dir = try dest.makeOpenPath(next.name, .{});
+                var sub_source = try source.openDir(next.name, .{});
+                defer {
+                    sub_dir.close();
+                    sub_source.close();
+                }
+                try copyDirAll(sub_source, sub_dir);
+            },
+            .File => {
+                var source_file = try source.openFile(next.name, .{});
+                var dest_file = try dest.createFile(next.name, .{});
+                defer {
+                    source_file.close();
+                    dest_file.close();
+                }
+                const stat = try source_file.stat();
+                const ncopied = try source_file.copyRangeAll(0, dest_file, 0, stat.size);
+                assert(ncopied == stat.size);
+            },
+            else => |kind| {
+                std.log.warn("install: unexpected file kind '{}' will be ignored", .{kind});
+            },
+        }
+    }
+}
 
 pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(std.heap.page_allocator);
