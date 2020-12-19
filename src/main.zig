@@ -71,6 +71,9 @@ const dest_target: Target = .{
     .arch = Arch.fromTargetCpuArch(builtin.arch),
 };
 
+const headers_source_prefix: []const u8 = "libc/include";
+const common_name = "any-macos-any";
+
 const Contents = struct {
     bytes: []const u8,
     hit_count: usize,
@@ -154,10 +157,15 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     const headers_list_file = try tmp.dir.openFile(headers_list_filename, .{});
     defer headers_list_file.close();
 
-    // Create out dir
-    var out_dir = try fs.cwd().makeOpenPath(try dest_target.name(allocator), .{});
+    var headers_dir = try fs.cwd().openDir(headers_source_prefix, .{});
+    defer headers_dir.close();
+
+    const dest_path = try dest_target.name(allocator);
+    try headers_dir.deleteTree(dest_path);
+
+    var dest_dir = try headers_dir.makeOpenPath(dest_path, .{});
     var dirs = std.StringHashMap(fs.Dir).init(allocator);
-    try dirs.putNoClobber(".", out_dir);
+    try dirs.putNoClobber(".", dest_dir);
 
     const headers_list_str = try headers_list_file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
     const prefix = "/usr/include";
@@ -171,7 +179,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
             const dirname = fs.path.dirname(out_rel_path_stripped) orelse ".";
             const maybe_dir = try dirs.getOrPut(dirname);
             if (!maybe_dir.found_existing) {
-                maybe_dir.entry.value = try out_dir.makeOpenPath(dirname, .{});
+                maybe_dir.entry.value = try dest_dir.makeOpenPath(dirname, .{});
             }
             const basename = fs.path.basename(out_rel_path_stripped);
 
@@ -196,35 +204,23 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
         process.exit(1);
     }
 
-    const dest_target_name = try dest_target.name(allocator);
-    var source_dir = fs.cwd().openDir(dest_target_name, .{}) catch |err| switch (err) {
-        error.FileNotFound => {
-            const msg = try std.fmt.allocPrint(allocator, "install: source path '{}' not found; did you forget to run `fetch_them_macos_headers` first?", .{dest_target_name});
-            try io.getStdErr().writeAll(msg);
-            process.exit(1);
-        },
-        else => return err,
-    };
-    defer source_dir.close();
-
-    const dest_path = args[0];
-    var dest_dir = fs.cwd().openDir(dest_path, .{}) catch |err| switch (err) {
+    const install_path = args[0];
+    var install_dir = fs.cwd().openDir(install_path, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => {
-            const msg = try std.fmt.allocPrint(allocator, "install: destination path '{}' not found or not a directory", .{dest_path});
+            const msg = try std.fmt.allocPrint(allocator, "install: installation path '{}' not found or not a directory", .{install_path});
             try io.getStdErr().writeAll(msg);
             process.exit(1);
         },
         else => return err,
     };
-    defer dest_dir.close();
+    defer install_dir.close();
 
     var path_table = PathTable.init(allocator);
     var hash_to_contents = HashToContents.init(allocator);
 
     var savings = FindResult{};
     inline for (targets) |target| {
-        const path = if (comptime target.eql(dest_target)) "." else dest_path;
-        const res = try findDuplicates(target, allocator, path, &path_table, &hash_to_contents);
+        const res = try findDuplicates(target, allocator, headers_source_prefix, &path_table, &hash_to_contents);
         savings.max_bytes_saved += res.max_bytes_saved;
         savings.total_bytes += res.total_bytes;
     }
@@ -233,8 +229,6 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
         savings.total_bytes,
         savings.total_bytes - savings.max_bytes_saved,
     });
-
-    const common_name = "any-macos-any";
 
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
@@ -282,14 +276,19 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
         }
     }
 
-    // Install the directories
+    inline for (targets) |target| {
+        const target_name = try target.name(allocator);
+        try install_dir.deleteTree(target_name);
+    }
+    try install_dir.deleteTree(common_name);
+
     var tmp_it = tmp.dir.iterate();
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
             .Directory => {
                 const sub_dir = try tmp.dir.openDir(entry.name, .{});
-                const dest_sub_dir = try dest_dir.makeOpenPath(entry.name, .{});
-                try copyDirAll(sub_dir, dest_sub_dir);
+                const install_sub_dir = try install_dir.makeOpenPath(entry.name, .{});
+                try copyDirAll(sub_dir, install_sub_dir);
             },
             else => {
                 std.log.warn("unexpected file format: not a directory: '{}'", .{entry.name});
