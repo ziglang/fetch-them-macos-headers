@@ -225,12 +225,12 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
         savings.total_bytes += res.total_bytes;
     }
 
-    std.log.warn("summary: {Bi:2} could be reduced to {Bi:2}", .{
-        savings.total_bytes,
-        savings.total_bytes - savings.max_bytes_saved,
+    std.log.warn("summary: {} could be reduced to {}", .{
+        std.fmt.fmtIntSizeBin(savings.total_bytes),
+        std.fmt.fmtIntSizeBin(savings.total_bytes - savings.max_bytes_saved),
     });
 
-    var tmp = tmpDir(.{});
+    var tmp = tmpDir(.{ .iterate=true, });
     defer tmp.cleanup();
 
     var missed_opportunity_bytes: usize = 0;
@@ -259,7 +259,7 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
                 if (contender.hit_count > 1) {
                     const this_missed_bytes = contender.hit_count * contender.bytes.len;
                     missed_opportunity_bytes += this_missed_bytes;
-                    std.debug.warn("Missed opportunity ({Bi:2}): {s}\n", .{ this_missed_bytes, path_kv.key });
+                    std.debug.warn("Missed opportunity ({}): {s}\n", .{ std.fmt.fmtIntSizeBin(this_missed_bytes), path_kv.key });
                 } else break;
             }
         }
@@ -286,7 +286,7 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
             .Directory => {
-                const sub_dir = try tmp.dir.openDir(entry.name, .{});
+                const sub_dir = try tmp.dir.openDir(entry.name, .{ .iterate=true, });
                 const install_sub_dir = try install_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, install_sub_dir);
             },
@@ -317,7 +317,7 @@ fn findDuplicates(
     try dir_stack.append(target_include_dir);
 
     while (dir_stack.popOrNull()) |full_dir_name| {
-        var dir = fs.cwd().openDir(full_dir_name, .{}) catch |err| switch (err) {
+        var dir = fs.cwd().openDir(full_dir_name, .{ .iterate=true, }) catch |err| switch (err) {
             error.FileNotFound => break,
             error.AccessDenied => break,
             else => return err,
@@ -345,10 +345,10 @@ fn findDuplicates(
                     if (gop.found_existing) {
                         result.max_bytes_saved += raw_bytes.len;
                         gop.entry.value.hit_count += 1;
-                        std.log.warn("duplicate: {s} {s} ({Bi:2})", .{
+                        std.log.warn("duplicate: {s} {s} ({})", .{
                             target_name,
                             rel_path,
-                            raw_bytes.len,
+                            std.fmt.fmtIntSizeBin(raw_bytes.len),
                         });
                     } else {
                         gop.entry.value = Contents{
@@ -381,7 +381,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
         switch (next.kind) {
             .Directory => {
                 var sub_dir = try dest.makeOpenPath(next.name, .{});
-                var sub_source = try source.openDir(next.name, .{});
+                var sub_source = try source.openDir(next.name, .{ .iterate=true, });
                 defer {
                     sub_dir.close();
                     sub_source.close();
