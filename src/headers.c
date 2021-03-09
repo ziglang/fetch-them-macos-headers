@@ -121,6 +121,7 @@
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
+#include <libproc.h>
 
 // Depended on by libcxx
 #include <Block.h>
