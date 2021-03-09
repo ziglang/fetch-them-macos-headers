@@ -162,6 +162,9 @@
 // Provided by macOS LibC
 #include <memory.h>
 
+#define _XOPEN_SOURCE
+#include <ucontext.h>
+
 int main(int argc, char **argv) {
     return 0;
 }
