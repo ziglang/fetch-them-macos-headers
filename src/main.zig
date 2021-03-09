@@ -46,7 +46,7 @@ const Target = struct {
     }
 
     fn name(self: Target, allocator: *Allocator) ![]const u8 {
-        return std.fmt.allocPrint(allocator, "{}-{}-{}", .{
+        return std.fmt.allocPrint(allocator, "{s}-{s}-{s}", .{
             @tagName(self.arch),
             @tagName(self.os),
             @tagName(self.abi),
@@ -150,7 +150,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     });
 
     if (res.stderr.len != 0) {
-        std.debug.print("{}\n", .{res.stderr});
+        std.debug.print("{s}\n", .{res.stderr});
     }
 
     // Read in the contents of `upgrade.o.d`
@@ -207,7 +207,7 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
     const install_path = args[0];
     var install_dir = fs.cwd().openDir(install_path, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => {
-            const msg = try std.fmt.allocPrint(allocator, "install: installation path '{}' not found or not a directory", .{install_path});
+            const msg = try std.fmt.allocPrint(allocator, "install: installation path '{s}' not found or not a directory", .{install_path});
             try io.getStdErr().writeAll(msg);
             process.exit(1);
         },
@@ -259,7 +259,7 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
                 if (contender.hit_count > 1) {
                     const this_missed_bytes = contender.hit_count * contender.bytes.len;
                     missed_opportunity_bytes += this_missed_bytes;
-                    std.debug.warn("Missed opportunity ({Bi:2}): {}\n", .{ this_missed_bytes, path_kv.key });
+                    std.debug.warn("Missed opportunity ({Bi:2}): {s}\n", .{ this_missed_bytes, path_kv.key });
                 } else break;
             }
         }
@@ -291,7 +291,7 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
                 try copyDirAll(sub_dir, install_sub_dir);
             },
             else => {
-                std.log.warn("unexpected file format: not a directory: '{}'", .{entry.name});
+                std.log.warn("unexpected file format: not a directory: '{s}'", .{entry.name});
             },
         }
     }
@@ -345,7 +345,7 @@ fn findDuplicates(
                     if (gop.found_existing) {
                         result.max_bytes_saved += raw_bytes.len;
                         gop.entry.value.hit_count += 1;
-                        std.log.warn("duplicate: {} {} ({Bi:2})", .{
+                        std.log.warn("duplicate: {s} {s} ({Bi:2})", .{
                             target_name,
                             rel_path,
                             raw_bytes.len,
@@ -367,7 +367,7 @@ fn findDuplicates(
                     };
                     try target_to_hash.putNoClobber(target, hash);
                 },
-                else => std.log.warn("install: unexpected file: {}", .{full_path}),
+                else => std.log.warn("install: unexpected file: {s}", .{full_path}),
             }
         }
     }
@@ -400,7 +400,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
                 assert(ncopied == stat.size);
             },
             else => |kind| {
-                std.log.warn("install: unexpected file kind '{}' will be ignored", .{kind});
+                std.log.warn("install: unexpected file kind '{s}' will be ignored", .{kind});
             },
         }
     }
