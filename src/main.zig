@@ -230,7 +230,9 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
         std.fmt.fmtIntSizeBin(savings.total_bytes - savings.max_bytes_saved),
     });
 
-    var tmp = tmpDir(.{ .iterate=true, });
+    var tmp = tmpDir(.{
+        .iterate = true,
+    });
     defer tmp.cleanup();
 
     var missed_opportunity_bytes: usize = 0;
@@ -286,7 +288,9 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
             .Directory => {
-                const sub_dir = try tmp.dir.openDir(entry.name, .{ .iterate=true, });
+                const sub_dir = try tmp.dir.openDir(entry.name, .{
+                    .iterate = true,
+                });
                 const install_sub_dir = try install_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, install_sub_dir);
             },
@@ -317,7 +321,9 @@ fn findDuplicates(
     try dir_stack.append(target_include_dir);
 
     while (dir_stack.popOrNull()) |full_dir_name| {
-        var dir = fs.cwd().openDir(full_dir_name, .{ .iterate=true, }) catch |err| switch (err) {
+        var dir = fs.cwd().openDir(full_dir_name, .{
+            .iterate = true,
+        }) catch |err| switch (err) {
             error.FileNotFound => break,
             error.AccessDenied => break,
             else => return err,
@@ -381,7 +387,9 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
         switch (next.kind) {
             .Directory => {
                 var sub_dir = try dest.makeOpenPath(next.name, .{});
-                var sub_source = try source.openDir(next.name, .{ .iterate=true, });
+                var sub_source = try source.openDir(next.name, .{
+                    .iterate = true,
+                });
                 defer {
                     sub_dir.close();
                     sub_source.close();
