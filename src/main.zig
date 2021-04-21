@@ -90,31 +90,49 @@ const TargetToHash = std.ArrayHashMap(Target, []const u8, Target.hash, Target.eq
 const PathTable = std.StringHashMap(*TargetToHash);
 
 const usage =
-    \\Usage: fetch_them_macos_headers [cflags]
-    \\       fetch_them_macos_headers install [destination]
+    \\Usage: fetch_them_macos_headers fetch [cflags]
+    \\       fetch_them_macos_headers generate <destination>
     \\
     \\Commands:
-    \\  <empty> [cflags] (default)  Fetch macOS libc headers into <arch>-macos-gnu local directory
-    \\  install [destination]       Install <arch>-macos-gnu header directory into a given destination path
+    \\  fetch [cflags]              Fetch libc headers into libc/include/<arch>-macos-gnu dir
+    \\  generate <destination>      Generate deduplicated dirs { aarch64-macos-gnu, x86_64-macos-gnu, any-macos-any }
+    \\                              into a given <destination> path
     \\
     \\General Options:
     \\-h, --help                    Print this help and exit
 ;
 
+const hint =
+    \\Try:
+    \\1. Add missing libc headers to src/headers.c
+    \\2. Fetch them:
+    \\   ./zig-cache/bin/fetch_them_macos_headers fetch
+    \\3. Generate deduplicated headers dirs in <destination> path:
+    \\   ./zig-cache/bin/fetch_them_macos_headers generate <destination>
+    \\
+    \\See -h/--help for more info.
+;
+
 fn mainArgs(allocator: *Allocator, all_args: []const []const u8) !void {
     const args = all_args[1..];
-    if (args.len > 0) {
-        const first_arg = args[0];
-        if (mem.eql(u8, first_arg, "--help") or mem.eql(u8, first_arg, "-h")) {
-            try io.getStdOut().writeAll(usage);
-            return;
-        } else if (mem.eql(u8, first_arg, "install")) {
-            return installHeaders(allocator, args[1..]);
-        } else {
-            return fetchHeaders(allocator, args[1..]);
-        }
+    if (args.len == 0) {
+        try io.getStdErr().writeAll("fatal: no command or option specified\n\n");
+        try io.getStdOut().writeAll(hint);
+        return;
+    }
+
+    const first_arg = args[0];
+    if (mem.eql(u8, first_arg, "--help") or mem.eql(u8, first_arg, "-h")) {
+        try io.getStdOut().writeAll(usage);
+        return;
+    } else if (mem.eql(u8, first_arg, "generate")) {
+        return generateDedupDirs(allocator, args[1..]);
+    } else if (mem.eql(u8, first_arg, "fetch")) {
+        return fetchHeaders(allocator, args[1..]);
     } else {
-        return fetchHeaders(allocator, args);
+        const msg = try std.fmt.allocPrint(allocator, "fatal: unknown command or option: {s}", .{first_arg});
+        try io.getStdErr().writeAll(msg);
+        return;
     }
 }
 
@@ -157,7 +175,18 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     const headers_list_file = try tmp.dir.openFile(headers_list_filename, .{});
     defer headers_list_file.close();
 
-    var headers_dir = try fs.cwd().openDir(headers_source_prefix, .{});
+    var headers_dir = fs.cwd().openDir(headers_source_prefix, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => {
+            const msg = try std.fmt.allocPrint(
+                allocator,
+                "fatal: path '{s}' not found or not a directory. Did you accidentally delete it?",
+                .{headers_source_prefix},
+            );
+            try io.getStdErr().writeAll(msg);
+            process.exit(1);
+        },
+        else => return err,
+    };
     defer headers_dir.close();
 
     const dest_path = try dest_target.name(allocator);
@@ -198,22 +227,22 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     }
 }
 
-fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
+fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
-        try io.getStdErr().writeAll("install: no destination path specified");
+        try io.getStdErr().writeAll("fatal: no destination path specified");
         process.exit(1);
     }
 
-    const install_path = args[0];
-    var install_dir = fs.cwd().openDir(install_path, .{}) catch |err| switch (err) {
-        error.FileNotFound, error.NotDir => {
-            const msg = try std.fmt.allocPrint(allocator, "install: installation path '{s}' not found or not a directory", .{install_path});
+    const dest_path = args[0];
+    var dest_dir = fs.cwd().makeOpenPath(dest_path, .{}) catch |err| switch (err) {
+        error.NotDir => {
+            const msg = try std.fmt.allocPrint(allocator, "fatal: path '{s}' not a directory", .{dest_path});
             try io.getStdErr().writeAll(msg);
             process.exit(1);
         },
         else => return err,
     };
-    defer install_dir.close();
+    defer dest_dir.close();
 
     var path_table = PathTable.init(allocator);
     var hash_to_contents = HashToContents.init(allocator);
@@ -280,9 +309,9 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
 
     inline for (targets) |target| {
         const target_name = try target.name(allocator);
-        try install_dir.deleteTree(target_name);
+        try dest_dir.deleteTree(target_name);
     }
-    try install_dir.deleteTree(common_name);
+    try dest_dir.deleteTree(common_name);
 
     var tmp_it = tmp.dir.iterate();
     while (try tmp_it.next()) |entry| {
@@ -291,8 +320,8 @@ fn installHeaders(allocator: *Allocator, args: []const []const u8) !void {
                 const sub_dir = try tmp.dir.openDir(entry.name, .{
                     .iterate = true,
                 });
-                const install_sub_dir = try install_dir.makeOpenPath(entry.name, .{});
-                try copyDirAll(sub_dir, install_sub_dir);
+                const dest_sub_dir = try dest_dir.makeOpenPath(entry.name, .{});
+                try copyDirAll(sub_dir, dest_sub_dir);
             },
             else => {
                 std.log.warn("unexpected file format: not a directory: '{s}'", .{entry.name});
@@ -373,7 +402,7 @@ fn findDuplicates(
                     };
                     try target_to_hash.putNoClobber(target, hash);
                 },
-                else => std.log.warn("install: unexpected file: {s}", .{full_path}),
+                else => std.log.warn("unexpected file: {s}", .{full_path}),
             }
         }
     }
@@ -408,7 +437,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
                 assert(ncopied == stat.size);
             },
             else => |kind| {
-                std.log.warn("install: unexpected file kind '{s}' will be ignored", .{kind});
+                std.log.warn("unexpected file kind '{s}' will be ignored", .{kind});
             },
         }
     }
