@@ -128,6 +128,16 @@
 #include <xlocale.h>
 #include <copyfile.h>
 #include <mach-o/dyld.h>
+#include <mach-o/fat.h>
+#include <mach-o/nlist.h>
+#include <mach-o/reloc.h>
+#include <mach-o/arch.h>
+#include <mach-o/stab.h>
+#include <mach-o/ranlib.h>
+#include <mach-o/compact_unwind_encoding.h>
+#include <mach-o/arm64/reloc.h>
+#include <mach-o/x86_64/reloc.h>
+#include <ar.h>
 
 // Depended on by LLVM
 #include <sysexits.h>
@@ -150,6 +160,7 @@
 #include <os/lock.h>
 #include <simd/simd.h>
 #include <xpc/xpc.h>
+#include <CommonCrypto/CommonDigest.h>
 
 // Depended on by libuv
 #include <ifaddrs.h>
