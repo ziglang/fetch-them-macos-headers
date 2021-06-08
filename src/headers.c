@@ -83,6 +83,7 @@
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/msg.h>
+#include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/select.h>
 #include <sys/sem.h>
