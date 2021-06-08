@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const fs = std.fs;
 const io = std.io;
 const mem = std.mem;
@@ -68,7 +67,7 @@ const targets = [_]Target{
 };
 
 const dest_target: Target = .{
-    .arch = Arch.fromTargetCpuArch(builtin.arch),
+    .arch = Arch.fromTargetCpuArch(std.builtin.cpu.arch),
 };
 
 const headers_source_prefix: []const u8 = "libc/include";
@@ -85,8 +84,17 @@ const Contents = struct {
     }
 };
 
+const TargetToHashContext = struct {
+    pub fn hash(self: @This(), target: Target) u32 {
+        return target.hash();
+    }
+    pub fn eql(self: @This(), a: Target, b: Target) bool {
+        return a.eql(b);
+    }
+};
+const TargetToHash = std.ArrayHashMap(Target, []const u8, TargetToHashContext, true);
+
 const HashToContents = std.StringHashMap(Contents);
-const TargetToHash = std.ArrayHashMap(Target, []const u8, Target.hash, Target.eql, true);
 const PathTable = std.StringHashMap(*TargetToHash);
 
 const usage =
@@ -208,7 +216,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
             const dirname = fs.path.dirname(out_rel_path_stripped) orelse ".";
             const maybe_dir = try dirs.getOrPut(dirname);
             if (!maybe_dir.found_existing) {
-                maybe_dir.entry.value = try dest_dir.makeOpenPath(dirname, .{});
+                maybe_dir.value_ptr.* = try dest_dir.makeOpenPath(dirname, .{});
             }
             const basename = fs.path.basename(out_rel_path_stripped);
 
@@ -217,13 +225,13 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
             var orig_subdir = try fs.cwd().openDir(abs_dirname, .{});
             defer orig_subdir.close();
 
-            try orig_subdir.copyFile(basename, maybe_dir.entry.value, basename, .{});
+            try orig_subdir.copyFile(basename, maybe_dir.value_ptr.*, basename, .{});
         }
     }
 
     var dir_it = dirs.iterator();
     while (dir_it.next()) |entry| {
-        entry.value.close();
+        entry.value_ptr.close();
     }
 }
 
@@ -272,9 +280,9 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     while (path_it.next()) |path_kv| {
         var contents_list = std.ArrayList(*Contents).init(allocator);
         {
-            var hash_it = path_kv.value.iterator();
+            var hash_it = path_kv.value_ptr.*.iterator();
             while (hash_it.next()) |hash_kv| {
-                const contents = &hash_to_contents.getEntry(hash_kv.value).?.value;
+                const contents = &hash_to_contents.getEntry(hash_kv.value_ptr.*).?.value_ptr.*;
                 try contents_list.append(contents);
             }
         }
@@ -282,7 +290,7 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
         const best_contents = contents_list.popOrNull().?;
         if (best_contents.hit_count > 1) {
             // Put it in `any-macos-gnu`.
-            const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key });
+            const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
             try tmp.dir.makePath(fs.path.dirname(full_path).?);
             try tmp.dir.writeFile(full_path, best_contents.bytes);
             best_contents.is_generic = true;
@@ -290,18 +298,21 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
                 if (contender.hit_count > 1) {
                     const this_missed_bytes = contender.hit_count * contender.bytes.len;
                     missed_opportunity_bytes += this_missed_bytes;
-                    std.debug.warn("Missed opportunity ({}): {s}\n", .{ std.fmt.fmtIntSizeBin(this_missed_bytes), path_kv.key });
+                    std.debug.warn("Missed opportunity ({}): {s}\n", .{
+                        std.fmt.fmtIntSizeBin(this_missed_bytes),
+                        path_kv.key_ptr.*,
+                    });
                 } else break;
             }
         }
-        var hash_it = path_kv.value.iterator();
+        var hash_it = path_kv.value_ptr.*.iterator();
         while (hash_it.next()) |hash_kv| {
-            const contents = &hash_to_contents.getEntry(hash_kv.value).?.value;
+            const contents = &hash_to_contents.getEntry(hash_kv.value_ptr.*).?.value_ptr.*;
             if (contents.is_generic) continue;
 
-            const target = hash_kv.key;
+            const target = hash_kv.key_ptr.*;
             const target_name = try target.name(allocator);
-            const full_path = try fs.path.join(allocator, &[_][]const u8{ target_name, path_kv.key });
+            const full_path = try fs.path.join(allocator, &[_][]const u8{ target_name, path_kv.key_ptr.* });
             try tmp.dir.makePath(fs.path.dirname(full_path).?);
             try tmp.dir.writeFile(full_path, contents.bytes);
         }
@@ -379,14 +390,14 @@ fn findDuplicates(
                     const gop = try hash_to_contents.getOrPut(hash);
                     if (gop.found_existing) {
                         result.max_bytes_saved += raw_bytes.len;
-                        gop.entry.value.hit_count += 1;
+                        gop.value_ptr.hit_count += 1;
                         std.log.warn("duplicate: {s} {s} ({})", .{
                             target_name,
                             rel_path,
                             std.fmt.fmtIntSizeBin(raw_bytes.len),
                         });
                     } else {
-                        gop.entry.value = Contents{
+                        gop.value_ptr.* = Contents{
                             .bytes = trimmed,
                             .hit_count = 1,
                             .hash = hash,
@@ -394,10 +405,10 @@ fn findDuplicates(
                         };
                     }
                     const path_gop = try path_table.getOrPut(rel_path);
-                    const target_to_hash = if (path_gop.found_existing) path_gop.entry.value else blk: {
+                    const target_to_hash = if (path_gop.found_existing) path_gop.value_ptr.* else blk: {
                         const ptr = try allocator.create(TargetToHash);
                         ptr.* = TargetToHash.init(allocator);
-                        path_gop.entry.value = ptr;
+                        path_gop.value_ptr.* = ptr;
                         break :blk ptr;
                     };
                     try target_to_hash.putNoClobber(target, hash);
