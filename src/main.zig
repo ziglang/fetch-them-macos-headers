@@ -209,24 +209,31 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
 
     var it = mem.split(headers_list_str, "\n");
     while (it.next()) |line| {
-        if (mem.lastIndexOf(u8, line, "clang") != null) continue;
-        if (mem.lastIndexOf(u8, line, prefix[0..])) |idx| {
+        var out_rel_path_stripped: []const u8 = undefined;
+        if (mem.lastIndexOf(u8, line, "clang")) |clang_idx| {
+            // "/Library/Developer/CommandLineTools/usr/lib/clang/12.0.5/include/stddef.h"
+            if (mem.indexOf(u8, line[clang_idx..], "/include/")) |include_idx| {
+                const out_rel_path = line[clang_idx..][include_idx+"/include/".len ..]; // "stddef.h \"
+                out_rel_path_stripped = mem.trim(u8, out_rel_path, " \\"); // "stddef.h"
+            } else unreachable;
+        } else if (mem.lastIndexOf(u8, line, prefix[0..])) |idx| {
             const out_rel_path = line[idx + prefix.len + 1 ..];
-            const out_rel_path_stripped = mem.trim(u8, out_rel_path, " \\");
-            const dirname = fs.path.dirname(out_rel_path_stripped) orelse ".";
-            const maybe_dir = try dirs.getOrPut(dirname);
-            if (!maybe_dir.found_existing) {
-                maybe_dir.value_ptr.* = try dest_dir.makeOpenPath(dirname, .{});
-            }
-            const basename = fs.path.basename(out_rel_path_stripped);
+            out_rel_path_stripped = mem.trim(u8, out_rel_path, " \\");
+        } else continue;
 
-            const line_stripped = mem.trim(u8, line, " \\");
-            const abs_dirname = fs.path.dirname(line_stripped).?;
-            var orig_subdir = try fs.cwd().openDir(abs_dirname, .{});
-            defer orig_subdir.close();
-
-            try orig_subdir.copyFile(basename, maybe_dir.value_ptr.*, basename, .{});
+        const dirname = fs.path.dirname(out_rel_path_stripped) orelse ".";
+        const maybe_dir = try dirs.getOrPut(dirname);
+        if (!maybe_dir.found_existing) {
+            maybe_dir.value_ptr.* = try dest_dir.makeOpenPath(dirname, .{});
         }
+        const basename = fs.path.basename(out_rel_path_stripped);
+
+        const line_stripped = mem.trim(u8, line, " \\");
+        const abs_dirname = fs.path.dirname(line_stripped).?;
+        var orig_subdir = try fs.cwd().openDir(abs_dirname, .{});
+        defer orig_subdir.close();
+
+        try orig_subdir.copyFile(basename, maybe_dir.value_ptr.*, basename, .{});
     }
 
     var dir_it = dirs.iterator();
