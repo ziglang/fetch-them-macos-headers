@@ -80,15 +80,18 @@ const Contents = struct {
     is_generic: bool,
 
     fn hitCountLessThan(context: void, lhs: *const Contents, rhs: *const Contents) bool {
+        _ = context;
         return lhs.hit_count < rhs.hit_count;
     }
 };
 
 const TargetToHashContext = struct {
     pub fn hash(self: @This(), target: Target) u32 {
+        _ = self;
         return target.hash();
     }
     pub fn eql(self: @This(), a: Target, b: Target) bool {
+        _ = self;
         return a.eql(b);
     }
 };
