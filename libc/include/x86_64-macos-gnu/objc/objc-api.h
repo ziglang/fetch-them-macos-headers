@@ -96,6 +96,12 @@
 #   define NS_ENFORCE_NSOBJECT_DESIGNATED_INITIALIZER 1
 #endif
 
+/* The arm64 ABI requires proper casting to ensure arguments are passed
+ *  * correctly.  */
+#if defined(__arm64__) && !__swift__
+#   undef OBJC_OLD_DISPATCH_PROTOTYPES
+#   define OBJC_OLD_DISPATCH_PROTOTYPES 0
+#endif
 
 /* OBJC_OLD_DISPATCH_PROTOTYPES == 0 enforces the rule that the dispatch 
  * functions must be cast to an appropriate function pointer type. */
@@ -274,6 +280,24 @@
 #       define OBJC_RETURNS_RETAINED __attribute__((ns_returns_retained))
 #   else
 #       define OBJC_RETURNS_RETAINED
+#   endif
+#endif
+
+/* OBJC_COLD: very rarely called, e.g. on error path */
+#if !defined(OBJC_COLD)
+#   if __OBJC__ && __has_attribute(cold)
+#       define OBJC_COLD __attribute__((cold))
+#   else
+#       define OBJC_COLD
+#   endif
+#endif
+
+/* OBJC_NORETURN: does not return normally, but may throw */
+#if !defined(OBJC_NORETURN)
+#   if __OBJC__ && __has_attribute(noreturn)
+#       define OBJC_NORETURN __attribute__((noreturn))
+#   else
+#       define OBJC_NORETURN
 #   endif
 #endif
 
