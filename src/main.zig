@@ -106,7 +106,9 @@ const PathTable = std.StringHashMap(*TargetToHash);
 /// into a shared include dir such as `any-macos-any`.
 const dont_dedup_list = &[_][]const u8{
     "libkern/OSAtomic.h",
+    "libkern/OSAtomicDeprecated.h",
     "libkern/OSSpinLockDeprecated.h",
+    "libkern/OSAtomicQueue.h",
 };
 
 fn generateDontDedupMap(allocator: *Allocator) !std.StringHashMap(void) {
