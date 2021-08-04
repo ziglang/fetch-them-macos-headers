@@ -100,6 +100,25 @@ const TargetToHash = std.ArrayHashMap(Target, []const u8, TargetToHashContext, t
 const HashToContents = std.StringHashMap(Contents);
 const PathTable = std.StringHashMap(*TargetToHash);
 
+/// The don't-dedup-list contains file paths with known problematic headers
+/// which while contain the same contents between architectures, should not be
+/// deduped since they contain includes, etc. which are relative and thus cannot be separated
+/// into a shared include dir such as `any-macos-any`.
+const dont_dedup_list = &[_][]const u8{
+    "libkern/OSAtomic.h",
+    "libkern/OSSpinLockDeprecated.h",
+};
+
+fn generateDontDedupMap(allocator: *Allocator) !std.StringHashMap(void) {
+    var map = std.StringHashMap(void).init(allocator);
+    errdefer map.deinit();
+    try map.ensureCapacity(dont_dedup_list.len);
+    for (dont_dedup_list) |path| {
+        map.putAssumeCapacityNoClobber(path, {});
+    }
+    return map;
+}
+
 const usage =
     \\Usage: fetch_them_macos_headers fetch [cflags]
     \\       fetch_them_macos_headers generate <destination>
@@ -179,7 +198,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     });
 
     if (res.stderr.len != 0) {
-        std.debug.print("{s}\n", .{res.stderr});
+        std.log.err("{s}", .{res.stderr});
     }
 
     // Read in the contents of `upgrade.o.d`
@@ -275,37 +294,42 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     });
     defer tmp.cleanup();
 
+    var dont_dedup_map = try generateDontDedupMap(allocator);
+    defer dont_dedup_map.deinit();
+
     var missed_opportunity_bytes: usize = 0;
     // Iterate path_table. For each path, put all the hashes into a list. Sort by hit_count.
     // The hash with the highest hit_count gets to be the "generic" one. Everybody else
     // gets their header in a separate arch directory.
     var path_it = path_table.iterator();
     while (path_it.next()) |path_kv| {
-        var contents_list = std.ArrayList(*Contents).init(allocator);
-        {
-            var hash_it = path_kv.value_ptr.*.iterator();
-            while (hash_it.next()) |hash_kv| {
-                const contents = &hash_to_contents.getEntry(hash_kv.value_ptr.*).?.value_ptr.*;
-                try contents_list.append(contents);
+        if (!dont_dedup_map.contains(path_kv.key_ptr.*)) {
+            var contents_list = std.ArrayList(*Contents).init(allocator);
+            {
+                var hash_it = path_kv.value_ptr.*.iterator();
+                while (hash_it.next()) |hash_kv| {
+                    const contents = &hash_to_contents.getEntry(hash_kv.value_ptr.*).?.value_ptr.*;
+                    try contents_list.append(contents);
+                }
             }
-        }
-        std.sort.sort(*Contents, contents_list.items, {}, Contents.hitCountLessThan);
-        const best_contents = contents_list.popOrNull().?;
-        if (best_contents.hit_count > 1) {
-            // Put it in `any-macos-gnu`.
-            const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
-            try tmp.dir.makePath(fs.path.dirname(full_path).?);
-            try tmp.dir.writeFile(full_path, best_contents.bytes);
-            best_contents.is_generic = true;
-            while (contents_list.popOrNull()) |contender| {
-                if (contender.hit_count > 1) {
-                    const this_missed_bytes = contender.hit_count * contender.bytes.len;
-                    missed_opportunity_bytes += this_missed_bytes;
-                    std.debug.warn("Missed opportunity ({}): {s}\n", .{
-                        std.fmt.fmtIntSizeBin(this_missed_bytes),
-                        path_kv.key_ptr.*,
-                    });
-                } else break;
+            std.sort.sort(*Contents, contents_list.items, {}, Contents.hitCountLessThan);
+            const best_contents = contents_list.popOrNull().?;
+            if (best_contents.hit_count > 1) {
+                // Put it in `any-macos-gnu`.
+                const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
+                try tmp.dir.makePath(fs.path.dirname(full_path).?);
+                try tmp.dir.writeFile(full_path, best_contents.bytes);
+                best_contents.is_generic = true;
+                while (contents_list.popOrNull()) |contender| {
+                    if (contender.hit_count > 1) {
+                        const this_missed_bytes = contender.hit_count * contender.bytes.len;
+                        missed_opportunity_bytes += this_missed_bytes;
+                        std.log.warn("Missed opportunity ({}): {s}", .{
+                            std.fmt.fmtIntSizeBin(this_missed_bytes),
+                            path_kv.key_ptr.*,
+                        });
+                    } else break;
+                }
             }
         }
         var hash_it = path_kv.value_ptr.*.iterator();
