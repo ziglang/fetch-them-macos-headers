@@ -67,7 +67,7 @@ const targets = [_]Target{
 };
 
 const dest_target: Target = .{
-    .arch = Arch.fromTargetCpuArch(std.builtin.cpu.arch),
+    .arch = Arch.fromTargetCpuArch(@import("builtin").cpu.arch),
 };
 
 const headers_source_prefix: []const u8 = "libc/include";
@@ -231,7 +231,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     const headers_list_str = try headers_list_file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
     const prefix = "/usr/include";
 
-    var it = mem.split(headers_list_str, "\n");
+    var it = mem.split(u8, headers_list_str, "\n");
     while (it.next()) |line| {
         if (mem.lastIndexOf(u8, line, "clang") != null) continue;
         if (mem.lastIndexOf(u8, line, prefix[0..])) |idx| {
