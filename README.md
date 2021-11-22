@@ -22,13 +22,13 @@ zig build
 3. Fetch headers into `libc/include/<arch>-macos-gnu`
 
 ```
-./zig-cache/bin/fetch_them_macos_headers fetch
+./zig-out/bin/fetch_them_macos_headers fetch
 ```
 
 4. Generate deduplicated headers dirs in `<destination>` path
 
 ```
-./zig-cache/bin/fetch_them_macos_headers generate <destination>
+./zig-out/bin/fetch_them_macos_headers generate <destination>
 ```
 
 5. (Optional) Copy the contents of `<destination>` into Zig's `lib/libc/include/`, and analyze the changes with
