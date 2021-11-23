@@ -138,9 +138,9 @@ const hint =
     \\Try:
     \\1. Add missing libc headers to src/headers.c
     \\2. Fetch them:
-    \\   ./zig-cache/bin/fetch_them_macos_headers fetch
+    \\   ./zig-out/bin/fetch_them_macos_headers fetch
     \\3. Generate deduplicated headers dirs in <destination> path:
-    \\   ./zig-cache/bin/fetch_them_macos_headers generate <destination>
+    \\   ./zig-out/bin/fetch_them_macos_headers generate <destination>
     \\
     \\See -h/--help for more info.
 ;
