@@ -24,24 +24,35 @@ const Arch = enum {
     }
 };
 
-const Abi = enum {
-    any,
-    gnu,
+const Abi = enum { any, gnu };
+
+const OsVer = enum(u32) {
+    any = 0,
+    catalina = 10,
+    big_sur = 11,
+    monterey = 12,
 };
 
 const Target = struct {
     arch: Arch,
     os: OsTag = .macos,
+    os_ver: OsVer,
     abi: Abi = .gnu,
 
     fn hash(a: Target) u32 {
-        return @enumToInt(a.arch) +%
-            (@enumToInt(a.os) *% @as(u32, 4202347608)) +%
-            (@enumToInt(a.abi) *% @as(u32, 4082223418));
+        var hasher = std.hash.Wyhash.init(0);
+        std.hash.autoHash(&hasher, a.arch);
+        std.hash.autoHash(&hasher, a.os);
+        std.hash.autoHash(&hasher, a.os_ver);
+        std.hash.autoHash(&hasher, a.abi);
+        return @truncate(u32, hasher.final());
     }
 
     fn eql(a: Target, b: Target) bool {
-        return a.arch == b.arch and a.os == b.os and a.abi == b.abi;
+        return a.arch == b.arch and
+            a.os == b.os and
+            a.os_ver == b.os_ver and
+            a.abi == b.abi;
     }
 
     fn name(self: Target, allocator: *Allocator) ![]const u8 {
@@ -51,26 +62,60 @@ const Target = struct {
             @tagName(self.abi),
         });
     }
+
+    fn fullName(self: Target, allocator: *Allocator) ![]const u8 {
+        if (self.os_ver == .any) return self.name(allocator);
+        return std.fmt.allocPrint(allocator, "{s}-{s}.{d}-{s}", .{
+            @tagName(self.arch),
+            @tagName(self.os),
+            @enumToInt(self.os_ver),
+            @tagName(self.abi),
+        });
+    }
 };
 
 const targets = [_]Target{
     Target{
         .arch = .any,
         .abi = .any,
+        .os_ver = .any,
     },
     Target{
         .arch = .aarch64,
+        .os_ver = .any,
     },
     Target{
         .arch = .x86_64,
+        .os_ver = .any,
+    },
+    Target{
+        .arch = .x86_64,
+        .os_ver = .catalina,
+    },
+    Target{
+        .arch = .x86_64,
+        .os_ver = .big_sur,
+    },
+    Target{
+        .arch = .x86_64,
+        .os_ver = .monterey,
+    },
+    Target{
+        .arch = .aarch64,
+        .os_ver = .big_sur,
+    },
+    Target{
+        .arch = .aarch64,
+        .os_ver = .monterey,
     },
 };
 
 const dest_target: Target = .{
     .arch = Arch.fromTargetCpuArch(@import("builtin").cpu.arch),
+    .os_ver = .any,
 };
 
-const headers_source_prefix: []const u8 = "libc/include";
+const headers_source_prefix: []const u8 = "headers";
 const common_name = "any-macos-any";
 
 const Contents = struct {
@@ -280,7 +325,7 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     var hash_to_contents = HashToContents.init(allocator);
 
     var savings = FindResult{};
-    inline for (targets) |target| {
+    for (targets) |target| {
         const res = try findDuplicates(target, allocator, headers_source_prefix, &path_table, &hash_to_contents);
         savings.max_bytes_saved += res.max_bytes_saved;
         savings.total_bytes += res.total_bytes;
@@ -340,15 +385,15 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
             if (contents.is_generic) continue;
 
             const target = hash_kv.key_ptr.*;
-            const target_name = try target.name(allocator);
+            const target_name = try target.fullName(allocator);
             const full_path = try fs.path.join(allocator, &[_][]const u8{ target_name, path_kv.key_ptr.* });
             try tmp.dir.makePath(fs.path.dirname(full_path).?);
             try tmp.dir.writeFile(full_path, contents.bytes);
         }
     }
 
-    inline for (targets) |target| {
-        const target_name = try target.name(allocator);
+    for (targets) |target| {
+        const target_name = try target.fullName(allocator);
         try dest_dir.deleteTree(target_name);
     }
     try dest_dir.deleteTree(common_name);
@@ -376,7 +421,7 @@ const FindResult = struct {
 };
 
 fn findDuplicates(
-    comptime target: Target,
+    target: Target,
     allocator: *Allocator,
     dest_path: []const u8,
     path_table: *PathTable,
@@ -384,7 +429,7 @@ fn findDuplicates(
 ) !FindResult {
     var result = FindResult{};
 
-    const target_name = try target.name(allocator);
+    const target_name = try target.fullName(allocator);
     const target_include_dir = try fs.path.join(allocator, &[_][]const u8{ dest_path, target_name });
     var dir_stack = std.ArrayList([]const u8).init(allocator);
     try dir_stack.append(target_include_dir);
