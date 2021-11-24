@@ -116,7 +116,6 @@ const dest_target: Target = .{
 };
 
 const headers_source_prefix: []const u8 = "headers";
-const common_name = "any-macos-any";
 
 const Contents = struct {
     bytes: []const u8,
@@ -321,12 +320,74 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     };
     defer dest_dir.close();
 
+    var dont_dedup_map = try generateDontDedupMap(allocator);
+    defer dont_dedup_map.deinit();
+
+    var layer_2_targets = std.ArrayList(TargetWithPrefix).init(allocator);
+    defer layer_2_targets.deinit();
+
+    for (&[_]OsVer{ .catalina, .big_sur, .monterey }) |os_ver| {
+        var layer_1_targets = std.ArrayList(TargetWithPrefix).init(allocator);
+        defer layer_1_targets.deinit();
+
+        for (targets) |target| {
+            if (target.os_ver != os_ver) continue;
+            try layer_1_targets.append(.{
+                .prefix = headers_source_prefix,
+                .target = target,
+            });
+        }
+
+        if (layer_1_targets.items.len < 2) {
+            try layer_2_targets.appendSlice(layer_1_targets.items);
+            continue;
+        }
+
+        const layer_2_target = try dedupDirs(allocator, .{
+            .os_ver = os_ver,
+            .dest_path = dest_path,
+            .dest_dir = dest_dir,
+            .targets = layer_1_targets.items,
+            .dont_dedup_map = &dont_dedup_map,
+        });
+        try layer_2_targets.append(layer_2_target);
+    }
+
+    const layer_3_target = try dedupDirs(allocator, .{
+        .os_ver = .any,
+        .dest_path = dest_path,
+        .dest_dir = dest_dir,
+        .targets = layer_2_targets.items,
+        .dont_dedup_map = &dont_dedup_map,
+    });
+    assert(layer_3_target.target.eql(targets[0]));
+}
+
+const TargetWithPrefix = struct {
+    prefix: []const u8,
+    target: Target,
+};
+
+const DedupDirsArgs = struct {
+    os_ver: OsVer,
+    dest_path: []const u8,
+    dest_dir: fs.Dir,
+    targets: []const TargetWithPrefix,
+    dont_dedup_map: *const std.StringHashMap(void),
+};
+
+fn dedupDirs(allocator: *Allocator, args: DedupDirsArgs) !TargetWithPrefix {
+    var tmp = tmpDir(.{
+        .iterate = true,
+    });
+    defer tmp.cleanup();
+
     var path_table = PathTable.init(allocator);
     var hash_to_contents = HashToContents.init(allocator);
 
     var savings = FindResult{};
-    for (targets) |target| {
-        const res = try findDuplicates(target, allocator, headers_source_prefix, &path_table, &hash_to_contents);
+    for (args.targets) |target| {
+        const res = try findDuplicates(target.target, allocator, target.prefix, &path_table, &hash_to_contents);
         savings.max_bytes_saved += res.max_bytes_saved;
         savings.total_bytes += res.total_bytes;
     }
@@ -336,13 +397,12 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
         std.fmt.fmtIntSizeBin(savings.total_bytes - savings.max_bytes_saved),
     });
 
-    var tmp = tmpDir(.{
-        .iterate = true,
-    });
-    defer tmp.cleanup();
-
-    var dont_dedup_map = try generateDontDedupMap(allocator);
-    defer dont_dedup_map.deinit();
+    const output_target = Target{
+        .arch = .any,
+        .abi = .any,
+        .os_ver = args.os_ver,
+    };
+    const common_name = try output_target.fullName(allocator);
 
     var missed_opportunity_bytes: usize = 0;
     // Iterate path_table. For each path, put all the hashes into a list. Sort by hit_count.
@@ -350,7 +410,7 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     // gets their header in a separate arch directory.
     var path_it = path_table.iterator();
     while (path_it.next()) |path_kv| {
-        if (!dont_dedup_map.contains(path_kv.key_ptr.*)) {
+        if (!args.dont_dedup_map.contains(path_kv.key_ptr.*)) {
             var contents_list = std.ArrayList(*Contents).init(allocator);
             {
                 var hash_it = path_kv.value_ptr.*.iterator();
@@ -392,11 +452,11 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
         }
     }
 
-    for (targets) |target| {
-        const target_name = try target.fullName(allocator);
-        try dest_dir.deleteTree(target_name);
+    for (args.targets) |target| {
+        const target_name = try target.target.fullName(allocator);
+        try args.dest_dir.deleteTree(target_name);
     }
-    try dest_dir.deleteTree(common_name);
+    try args.dest_dir.deleteTree(common_name);
 
     var tmp_it = tmp.dir.iterate();
     while (try tmp_it.next()) |entry| {
@@ -405,7 +465,7 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
                 const sub_dir = try tmp.dir.openDir(entry.name, .{
                     .iterate = true,
                 });
-                const dest_sub_dir = try dest_dir.makeOpenPath(entry.name, .{});
+                const dest_sub_dir = try args.dest_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, dest_sub_dir);
             },
             else => {
@@ -413,6 +473,11 @@ fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
             },
         }
     }
+
+    return TargetWithPrefix{
+        .prefix = args.dest_path,
+        .target = output_target,
+    };
 }
 
 const FindResult = struct {
