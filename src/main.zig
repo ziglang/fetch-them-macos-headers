@@ -170,8 +170,8 @@ const usage =
     \\       fetch_them_macos_headers generate <destination>
     \\
     \\Commands:
-    \\  fetch [cflags]              Fetch libc headers into libc/include/<arch>-macos-gnu dir
-    \\  generate <destination>      Generate deduplicated dirs { aarch64-macos-gnu, x86_64-macos-gnu, any-macos-any }
+    \\  fetch [cflags]              Fetch libc headers into headers/<arch>-macos.<os_ver> dir
+    \\  generate <destination>      Generate deduplicated dirs such as { aarch64-macos.11-gnu, x86_64-macos.11-gnu, any-macos.11-any }
     \\                              into a given <destination> path
     \\
     \\General Options:
@@ -303,6 +303,14 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     }
 }
 
+/// Dedups libs headers assuming the following layered structure:
+/// layer 1: x86_64-macos.10 x86_64-macos.11 x86_64-macos.12 aarch64-macos.11 aarch64-macos.12
+/// layer 2: any-macos.10 any-macos.11 any-macos.12
+/// layer 3: any-macos
+///
+/// The first layer consists of headers specific to a CPU architecture AND macOS version. The second
+/// layer consists of headers common to a macOS version across CPU architectures, and the final
+/// layer consists of headers common to all libc headers.
 fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
         try io.getStdErr().writeAll("fatal: no destination path specified");
