@@ -15,11 +15,11 @@ const Arch = enum {
     aarch64,
     x86_64,
 
-    fn fromTargetCpuArch(comptime arch: std.Target.Cpu.Arch) Arch {
+    fn fromTargetCpuArch(arch: std.Target.Cpu.Arch) Arch {
         return switch (arch) {
             .aarch64 => .aarch64,
             .x86_64 => .x86_64,
-            else => @compileError("unsupported CPU architecture"),
+            else => unreachable,
         };
     }
 };
@@ -72,6 +72,21 @@ const Target = struct {
             @tagName(self.abi),
         });
     }
+
+    fn fromStdTarget(std_target: std.Target) Target {
+        const ver = std_target.os.version_range.semver;
+        assert(ver.min.major == ver.max.major and ver.min.minor == ver.max.minor and ver.min.patch == ver.max.patch);
+        const os_ver: OsVer = switch (ver.max.major) {
+            10 => .catalina,
+            11 => .big_sur,
+            12 => .monterey,
+            else => unreachable,
+        };
+        return .{
+            .arch = Arch.fromTargetCpuArch(std_target.cpu.arch),
+            .os_ver = os_ver,
+        };
+    }
 };
 
 const targets = [_]Target{
@@ -108,11 +123,6 @@ const targets = [_]Target{
         .arch = .aarch64,
         .os_ver = .monterey,
     },
-};
-
-const dest_target: Target = .{
-    .arch = Arch.fromTargetCpuArch(@import("builtin").cpu.arch),
-    .os_ver = .any,
 };
 
 const headers_source_prefix: []const u8 = "headers";
@@ -265,7 +275,9 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
     };
     defer headers_dir.close();
 
-    const dest_path = try dest_target.name(allocator);
+    const dest_target_info = try std.zig.system.NativeTargetInfo.detect(allocator, .{});
+    const dest_target = Target.fromStdTarget(dest_target_info.target);
+    const dest_path = try dest_target.fullName(allocator);
     try headers_dir.deleteTree(dest_path);
 
     var dest_dir = try headers_dir.makeOpenPath(dest_path, .{});
