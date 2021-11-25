@@ -116,6 +116,8 @@
 #include <mach/clock.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <mach/thread_state.h>
+#include <mach/vm_param.h>
 #include <sys/acl.h>
 #include <sys/attr.h>
 #include <sys/ioctl.h>
