@@ -156,14 +156,16 @@
 #include <libkern/OSAtomic.h>
 #include <libkern/OSTypes.h>
 #include <MacTypes.h>
-#include <objc/message.h>
-#include <objc/NSObject.h>
-#include <objc/NSObjCRuntime.h>
-#include <objc/objc.h>
 #include <os/lock.h>
 #include <simd/simd.h>
 #include <xpc/xpc.h>
 #include <CommonCrypto/CommonDigest.h>
+
+#include <objc/message.h>
+#include <objc/NSObject.h>
+#include <objc/NSObjCRuntime.h>
+#include <objc/objc.h>
+#include <objc/objc-runtime.h>
 
 // Depended on by libuv
 #include <ifaddrs.h>
