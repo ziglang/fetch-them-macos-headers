@@ -55,7 +55,7 @@ const Target = struct {
             a.abi == b.abi;
     }
 
-    fn name(self: Target, allocator: *Allocator) ![]const u8 {
+    fn name(self: Target, allocator: Allocator) ![]const u8 {
         return std.fmt.allocPrint(allocator, "{s}-{s}-{s}", .{
             @tagName(self.arch),
             @tagName(self.os),
@@ -63,7 +63,7 @@ const Target = struct {
         });
     }
 
-    fn fullName(self: Target, allocator: *Allocator) ![]const u8 {
+    fn fullName(self: Target, allocator: Allocator) ![]const u8 {
         if (self.os_ver == .any) return self.name(allocator);
         return std.fmt.allocPrint(allocator, "{s}-{s}.{d}-{s}", .{
             @tagName(self.arch),
@@ -144,8 +144,9 @@ const TargetToHashContext = struct {
         _ = self;
         return target.hash();
     }
-    pub fn eql(self: @This(), a: Target, b: Target) bool {
+    pub fn eql(self: @This(), a: Target, b: Target, b_index: usize) bool {
         _ = self;
+        _ = b_index;
         return a.eql(b);
     }
 };
@@ -165,10 +166,10 @@ const dont_dedup_list = &[_][]const u8{
     "libkern/OSAtomicQueue.h",
 };
 
-fn generateDontDedupMap(allocator: *Allocator) !std.StringHashMap(void) {
+fn generateDontDedupMap(allocator: Allocator) !std.StringHashMap(void) {
     var map = std.StringHashMap(void).init(allocator);
     errdefer map.deinit();
-    try map.ensureCapacity(dont_dedup_list.len);
+    try map.ensureTotalCapacity(dont_dedup_list.len);
     for (dont_dedup_list) |path| {
         map.putAssumeCapacityNoClobber(path, {});
     }
@@ -199,7 +200,7 @@ const hint =
     \\See -h/--help for more info.
 ;
 
-fn mainArgs(allocator: *Allocator, all_args: []const []const u8) !void {
+fn mainArgs(allocator: Allocator, all_args: []const []const u8) !void {
     const args = all_args[1..];
     if (args.len == 0) {
         try io.getStdErr().writeAll("fatal: no command or option specified\n\n");
@@ -222,7 +223,7 @@ fn mainArgs(allocator: *Allocator, all_args: []const []const u8) !void {
     }
 }
 
-fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
+fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
@@ -323,7 +324,7 @@ fn fetchHeaders(allocator: *Allocator, args: []const []const u8) !void {
 /// The first layer consists of headers specific to a CPU architecture AND macOS version. The second
 /// layer consists of headers common to a macOS version across CPU architectures, and the final
 /// layer consists of headers common to all libc headers.
-fn generateDedupDirs(allocator: *Allocator, args: []const []const u8) !void {
+fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
         try io.getStdErr().writeAll("fatal: no destination path specified");
         process.exit(1);
@@ -396,7 +397,7 @@ const DedupDirsArgs = struct {
     dont_dedup_map: *const std.StringHashMap(void),
 };
 
-fn dedupDirs(allocator: *Allocator, args: DedupDirsArgs) !TargetWithPrefix {
+fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     var tmp = tmpDir(.{
         .iterate = true,
     });
@@ -507,7 +508,7 @@ const FindResult = struct {
 
 fn findDuplicates(
     target: Target,
-    allocator: *Allocator,
+    allocator: Allocator,
     dest_path: []const u8,
     path_table: *PathTable,
     hash_to_contents: *HashToContents,
@@ -615,7 +616,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
 
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
     return mainArgs(allocator, args);
