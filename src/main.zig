@@ -24,7 +24,7 @@ const Arch = enum {
     }
 };
 
-const Abi = enum { any, gnu };
+const Abi = enum { any, none };
 
 const OsVer = enum(u32) {
     any = 0,
@@ -37,7 +37,7 @@ const Target = struct {
     arch: Arch,
     os: OsTag = .macos,
     os_ver: OsVer,
-    abi: Abi = .gnu,
+    abi: Abi = .none,
 
     fn hash(a: Target) u32 {
         var hasher = std.hash.Wyhash.init(0);
@@ -182,7 +182,7 @@ const usage =
     \\
     \\Commands:
     \\  fetch [cflags]              Fetch libc headers into headers/<arch>-macos.<os_ver> dir
-    \\  generate <destination>      Generate deduplicated dirs such as { aarch64-macos.11-gnu, x86_64-macos.11-gnu, any-macos.11-any }
+    \\  generate <destination>      Generate deduplicated dirs such as { aarch64-macos.11-none, x86_64-macos.11-none, any-macos.11-any }
     \\                              into a given <destination> path
     \\
     \\General Options:
@@ -443,7 +443,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             std.sort.sort(*Contents, contents_list.items, {}, Contents.hitCountLessThan);
             const best_contents = contents_list.popOrNull().?;
             if (best_contents.hit_count > 1) {
-                // Put it in `any-macos-gnu`.
+                // Put it in `any-macos-none`.
                 const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
                 try tmp.dir.makePath(fs.path.dirname(full_path).?);
                 try tmp.dir.writeFile(full_path, best_contents.bytes);
