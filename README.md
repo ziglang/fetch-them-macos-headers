@@ -42,7 +42,7 @@ Usage: fetch_them_macos_headers fetch [cflags]
 
 Commands:
   fetch [cflags]              Fetch libc headers into libc/include/<arch>-macos-gnu dir
-  generate <destination>      Generate deduplicated dirs { aarch64-macos-gnu, x86_64-macos-gnu, any-macos-any }
+  generate <destination>      Generate deduplicated dirs { aarch64-macos-none, x86_64-macos-none, any-macos-any }
                               into a given <destination> path
 
 General Options:
