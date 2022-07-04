@@ -140,6 +140,11 @@ struct rt_metrics {
 
 #define IS_DIRECT_HOSTROUTE(rt) \
 	(((rt)->rt_flags & (RTF_HOST | RTF_GATEWAY)) == RTF_HOST)
+
+#define IS_DYNAMIC_DIRECT_HOSTROUTE(rt) \
+	(((rt)->rt_flags & (RTF_CLONING | RTF_PRCLONING | RTF_HOST | RTF_LLINFO |\
+	    RTF_WASCLONED | RTF_GATEWAY)) ==\
+	 (RTF_HOST | RTF_LLINFO | RTF_WASCLONED))
 /*
  * Routing statistics.
  */
