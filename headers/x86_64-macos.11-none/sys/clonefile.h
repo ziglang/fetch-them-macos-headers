@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+ * Copyright (c) 2015-2017 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -25,15 +25,29 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
-#ifndef _BSD_MACHINE__MCONTEXT_H_
-#define _BSD_MACHINE__MCONTEXT_H_
 
-#if defined (__i386__) || defined (__x86_64__)
-#include "i386/_mcontext.h"
-#elif defined (__arm__) || defined (__arm64__)
-#include "arm/_mcontext.h"
-#else
-#error architecture not supported
-#endif
+#ifndef _SYS_CLONEFILE_H_
+#define _SYS_CLONEFILE_H_
 
-#endif /* _BSD_MACHINE__MCONTEXT_H_ */
+/* Options for clonefile calls */
+#define CLONE_NOFOLLOW      0x0001     /* Don't follow symbolic links */
+#define CLONE_NOOWNERCOPY   0x0002     /* Don't copy ownership information from source */
+
+
+#include <sys/cdefs.h>
+#include <machine/_types.h>
+#include <_types/_uint32_t.h>
+#include <Availability.h>
+
+__BEGIN_DECLS
+
+int clonefileat(int, const char *, int, const char *, uint32_t) __OSX_AVAILABLE(10.12) __IOS_AVAILABLE(10.0) __TVOS_AVAILABLE(10.0) __WATCHOS_AVAILABLE(3.0);
+
+int fclonefileat(int, int, const char *, uint32_t) __OSX_AVAILABLE(10.12) __IOS_AVAILABLE(10.0) __TVOS_AVAILABLE(10.0) __WATCHOS_AVAILABLE(3.0);
+
+int clonefile(const char *, const char *, uint32_t) __OSX_AVAILABLE(10.12) __IOS_AVAILABLE(10.0) __TVOS_AVAILABLE(10.0) __WATCHOS_AVAILABLE(3.0);
+
+__END_DECLS
+
+
+#endif /* _SYS_CLONEFILE_H_ */
