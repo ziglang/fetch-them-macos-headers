@@ -443,5 +443,4 @@ XPC_ASSUME_NONNULL_END
 
 #endif // __BLOCKS__
 
-#endif // __XPC_ACTIVITY_H__ 
-
+#endif // __XPC_ACTIVITY_H__
