@@ -5,6 +5,7 @@ const mem = std.mem;
 const process = std.process;
 const assert = std.debug.assert;
 const tmpDir = std.testing.tmpDir;
+const tmpIterableDir = std.testing.tmpIterableDir;
 
 const Allocator = mem.Allocator;
 const Blake3 = std.crypto.hash.Blake3;
@@ -31,6 +32,7 @@ const OsVer = enum(u32) {
     catalina = 10,
     big_sur = 11,
     monterey = 12,
+    ventura = 13,
 };
 
 const Target = struct {
@@ -80,6 +82,7 @@ const Target = struct {
             10 => .catalina,
             11 => .big_sur,
             12 => .monterey,
+            13 => .ventura,
             else => unreachable,
         };
         return .{
@@ -116,12 +119,20 @@ const targets = [_]Target{
         .os_ver = .monterey,
     },
     Target{
+        .arch = .x86_64,
+        .os_ver = .ventura,
+    },
+    Target{
         .arch = .aarch64,
         .os_ver = .big_sur,
     },
     Target{
         .arch = .aarch64,
         .os_ver = .monterey,
+    },
+    Target{
+        .arch = .aarch64,
+        .os_ver = .ventura,
     },
 };
 
@@ -276,7 +287,7 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     };
     defer headers_dir.close();
 
-    const dest_target_info = try std.zig.system.NativeTargetInfo.detect(allocator, .{});
+    const dest_target_info = try std.zig.system.NativeTargetInfo.detect(.{});
     const dest_target = Target.fromStdTarget(dest_target_info.target);
     const dest_path = try dest_target.fullName(allocator);
     try headers_dir.deleteTree(dest_path);
@@ -347,7 +358,7 @@ fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
     var layer_2_targets = std.ArrayList(TargetWithPrefix).init(allocator);
     defer layer_2_targets.deinit();
 
-    for (&[_]OsVer{ .catalina, .big_sur, .monterey }) |os_ver| {
+    for (&[_]OsVer{ .catalina, .big_sur, .monterey, .ventura }) |os_ver| {
         var layer_1_targets = std.ArrayList(TargetWithPrefix).init(allocator);
         defer layer_1_targets.deinit();
 
@@ -398,9 +409,7 @@ const DedupDirsArgs = struct {
 };
 
 fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
-    var tmp = tmpDir(.{
-        .iterate = true,
-    });
+    var tmp = tmpIterableDir(.{});
     defer tmp.cleanup();
 
     var path_table = PathTable.init(allocator);
@@ -445,8 +454,8 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             if (best_contents.hit_count > 1) {
                 // Put it in `any-macos-none`.
                 const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
-                try tmp.dir.makePath(fs.path.dirname(full_path).?);
-                try tmp.dir.writeFile(full_path, best_contents.bytes);
+                try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
+                try tmp.iterable_dir.dir.writeFile(full_path, best_contents.bytes);
                 best_contents.is_generic = true;
                 while (contents_list.popOrNull()) |contender| {
                     if (contender.hit_count > 1) {
@@ -468,8 +477,8 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             const target = hash_kv.key_ptr.*;
             const target_name = try target.fullName(allocator);
             const full_path = try fs.path.join(allocator, &[_][]const u8{ target_name, path_kv.key_ptr.* });
-            try tmp.dir.makePath(fs.path.dirname(full_path).?);
-            try tmp.dir.writeFile(full_path, contents.bytes);
+            try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
+            try tmp.iterable_dir.dir.writeFile(full_path, contents.bytes);
         }
     }
 
@@ -479,13 +488,11 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     }
     try args.dest_dir.deleteTree(common_name);
 
-    var tmp_it = tmp.dir.iterate();
+    var tmp_it = tmp.iterable_dir.iterate();
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
             .Directory => {
-                const sub_dir = try tmp.dir.openDir(entry.name, .{
-                    .iterate = true,
-                });
+                const sub_dir = try tmp.iterable_dir.dir.openIterableDir(entry.name, .{});
                 const dest_sub_dir = try args.dest_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, dest_sub_dir);
             },
@@ -521,9 +528,7 @@ fn findDuplicates(
     try dir_stack.append(target_include_dir);
 
     while (dir_stack.popOrNull()) |full_dir_name| {
-        var dir = fs.cwd().openDir(full_dir_name, .{
-            .iterate = true,
-        }) catch |err| switch (err) {
+        var dir = fs.cwd().openIterableDir(full_dir_name, .{}) catch |err| switch (err) {
             error.FileNotFound => break,
             error.AccessDenied => break,
             else => return err,
@@ -581,15 +586,13 @@ fn findDuplicates(
     return result;
 }
 
-fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
+fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
     var it = source.iterate();
     while (try it.next()) |next| {
         switch (next.kind) {
             .Directory => {
                 var sub_dir = try dest.makeOpenPath(next.name, .{});
-                var sub_source = try source.openDir(next.name, .{
-                    .iterate = true,
-                });
+                var sub_source = try source.dir.openIterableDir(next.name, .{});
                 defer {
                     sub_dir.close();
                     sub_source.close();
@@ -597,7 +600,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
                 try copyDirAll(sub_source, sub_dir);
             },
             .File => {
-                var source_file = try source.openFile(next.name, .{});
+                var source_file = try source.dir.openFile(next.name, .{});
                 var dest_file = try dest.createFile(next.name, .{});
                 defer {
                     source_file.close();
@@ -608,7 +611,7 @@ fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
                 assert(ncopied == stat.size);
             },
             else => |kind| {
-                std.log.warn("unexpected file kind '{s}' will be ignored", .{kind});
+                std.log.warn("unexpected file kind '{any}' will be ignored", .{kind});
             },
         }
     }
