@@ -27,6 +27,12 @@
 #include <wchar.h>
 #include <wctype.h>
 
+// Source: https://en.wikipedia.org/wiki/C_standard_library#BSD_libc
+#include <fts.h>
+#include <db.h>
+#include <err.h>
+#include <vis.h>
+
 // Source: https://en.wikipedia.org/wiki/C_POSIX_library
 #include <aio.h>
 #include <arpa/inet.h>
