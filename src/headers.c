@@ -161,6 +161,13 @@
 #include <hfs/hfs_format.h>
 #include <hfs/hfs_unistr.h>
 #include <libkern/OSAtomic.h>
+#include <libkern/OSAtomicQueue.h>
+#include <libkern/OSByteOrder.h>
+#include <libkern/OSCacheControl.h>
+#include <libkern/OSDebug.h>
+#include <libkern/OSKextLib.h>
+#include <libkern/OSReturn.h>
+#include <libkern/OSThermalNotification.h>
 #include <libkern/OSTypes.h>
 #include <MacTypes.h>
 #include <os/lock.h>
