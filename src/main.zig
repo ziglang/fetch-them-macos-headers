@@ -77,8 +77,7 @@ const Target = struct {
 
     fn fromStdTarget(std_target: std.Target) Target {
         const ver = std_target.os.version_range.semver;
-        assert(ver.min.major == ver.max.major and ver.min.minor == ver.max.minor and ver.min.patch == ver.max.patch);
-        const os_ver: OsVer = switch (ver.max.major) {
+        const os_ver: OsVer = switch (ver.min.major) {
             10 => .catalina,
             11 => .big_sur,
             12 => .monterey,
@@ -188,13 +187,13 @@ fn generateDontDedupMap(allocator: Allocator) !std.StringHashMap(void) {
 }
 
 const usage =
-    \\Usage: fetch_them_macos_headers fetch [cflags]
+    \\Usage: fetch_them_macos_headers fetch [--target <target>][cflags] 
     \\       fetch_them_macos_headers generate <destination>
     \\
     \\Commands:
-    \\  fetch [cflags]              Fetch libc headers into headers/<arch>-macos.<os_ver> dir
-    \\  generate <destination>      Generate deduplicated dirs such as { aarch64-macos.11-none, x86_64-macos.11-none, any-macos.11-any }
-    \\                              into a given <destination> path
+    \\  fetch [--target <target][cflags]    Fetch libc headers into headers/<arch>-macos.<os_ver> dir
+    \\  generate <destination>              Generate deduplicated dirs such as { aarch64-macos.11-none, x86_64-macos.11-none, any-macos.11-any }
+    \\                                      into a given <destination> path
     \\
     \\General Options:
     \\-h, --help                    Print this help and exit
@@ -211,12 +210,18 @@ const hint =
     \\See -h/--help for more info.
 ;
 
+fn fatal(allocator: Allocator, comptime format: []const u8, args: anytype) noreturn {
+    ret: {
+        const msg = std.fmt.allocPrint(allocator, "fatal: " ++ format ++ "\n", args) catch break :ret;
+        std.io.getStdErr().writeAll(msg) catch {};
+    }
+    std.process.exit(1);
+}
+
 fn mainArgs(allocator: Allocator, all_args: []const []const u8) !void {
     const args = all_args[1..];
     if (args.len == 0) {
-        try io.getStdErr().writeAll("fatal: no command or option specified\n\n");
-        try io.getStdOut().writeAll(hint);
-        return;
+        fatal(allocator, "no command or option specified", .{});
     }
 
     const first_arg = args[0];
@@ -227,14 +232,48 @@ fn mainArgs(allocator: Allocator, all_args: []const []const u8) !void {
         return generateDedupDirs(allocator, args[1..]);
     } else if (mem.eql(u8, first_arg, "fetch")) {
         return fetchHeaders(allocator, args[1..]);
-    } else {
-        const msg = try std.fmt.allocPrint(allocator, "fatal: unknown command or option: {s}", .{first_arg});
-        try io.getStdErr().writeAll(msg);
-        return;
-    }
+    } else fatal(allocator, "unknown command or option: {s}", .{first_arg});
 }
 
+const ArgsIterator = struct {
+    args: []const []const u8,
+    i: usize = 0,
+    fn next(it: *@This()) ?[]const u8 {
+        if (it.i >= it.args.len) {
+            return null;
+        }
+        defer it.i += 1;
+        return it.args[it.i];
+    }
+};
+
 fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
+    var argv = std.ArrayList([]const u8).init(allocator);
+    var target_triple: ?[]const u8 = null;
+    var args_iter = ArgsIterator{ .args = args };
+    while (args_iter.next()) |arg| {
+        if (mem.eql(u8, arg, "--target")) {
+            target_triple = args_iter.next() orelse fatal(allocator, "expected target triple after {s}", .{arg});
+        } else try argv.append(arg);
+    }
+
+    var diags: std.zig.CrossTarget.ParseOptions.Diagnostics = .{};
+    var target_parse_options: std.zig.CrossTarget.ParseOptions = .{
+        .arch_os_abi = target_triple orelse "native",
+        .diagnostics = &diags,
+    };
+    const cross_target = try std.zig.CrossTarget.parse(target_parse_options);
+    const target_info = try std.zig.system.NativeTargetInfo.detect(cross_target);
+    const target = target_info.target;
+
+    if (!cross_target.isNative()) {
+        if (!(try isDarwinSDKInstalled(allocator, target))) {
+            fatal(allocator, "no matching SDK found for target {s}", .{
+                try target.zigTriple(allocator),
+            });
+        }
+    }
+
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
@@ -245,9 +284,21 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     const headers_list_filename = "headers.o.d";
     const headers_list_path = try fs.path.join(allocator, &[_][]const u8{ tmp_path, headers_list_filename });
 
-    var argv = std.ArrayList([]const u8).init(allocator);
-    try argv.appendSlice(&[_][]const u8{
+    const macos_version = try std.fmt.allocPrint(allocator, "-mmacosx-version-min={d}.{d}", .{
+        target.os.version_range.semver.min.major,
+        target.os.version_range.semver.min.minor,
+    });
+
+    var cc_argv = std.ArrayList([]const u8).init(allocator);
+    try cc_argv.appendSlice(&[_][]const u8{
         "cc",
+        "-arch",
+        switch (target.cpu.arch) {
+            .x86_64 => "x86_64",
+            .aarch64 => "arm64",
+            else => unreachable,
+        },
+        macos_version,
         "-o",
         tmp_file_path,
         "src/headers.c",
@@ -256,13 +307,13 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
         "-MF",
         headers_list_path,
     });
-    try argv.appendSlice(args);
+    try cc_argv.appendSlice(argv.items);
 
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
     const res = try std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = argv.items,
+        .argv = cc_argv.items,
     });
 
     if (res.stderr.len != 0) {
@@ -274,21 +325,16 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     defer headers_list_file.close();
 
     var headers_dir = fs.cwd().openDir(headers_source_prefix, .{}) catch |err| switch (err) {
-        error.FileNotFound, error.NotDir => {
-            const msg = try std.fmt.allocPrint(
-                allocator,
-                "fatal: path '{s}' not found or not a directory. Did you accidentally delete it?",
-                .{headers_source_prefix},
-            );
-            try io.getStdErr().writeAll(msg);
-            process.exit(1);
-        },
+        error.FileNotFound,
+        error.NotDir,
+        => fatal(allocator, "path '{s}' not found or not a directory. Did you accidentally delete it?", .{
+            headers_source_prefix,
+        }),
         else => return err,
     };
     defer headers_dir.close();
 
-    const dest_target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-    const dest_target = Target.fromStdTarget(dest_target_info.target);
+    const dest_target = Target.fromStdTarget(target);
     const dest_path = try dest_target.fullName(allocator);
     try headers_dir.deleteTree(dest_path);
 
@@ -327,6 +373,25 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     }
 }
 
+fn isDarwinSDKInstalled(allocator: Allocator, target: std.Target) !bool {
+    const sdk = try std.fmt.allocPrint(allocator, "macosx{d}.{d}", .{
+        target.os.version_range.semver.min.major,
+        target.os.version_range.semver.min.minor,
+    });
+    defer allocator.free(sdk);
+    const argv = &[_][]const u8{ "/usr/bin/xcrun", "--sdk", sdk, "--show-sdk-path" };
+    const result = try std.ChildProcess.exec(.{ .allocator = allocator, .argv = argv });
+    defer {
+        allocator.free(result.stderr);
+        allocator.free(result.stdout);
+    }
+    if (result.stderr.len != 0 or result.term.Exited != 0) {
+        // We don't actually care if there were errors as this is best-effort check anyhow.
+        return false;
+    }
+    return result.stdout.len > 0;
+}
+
 /// Dedups libs headers assuming the following layered structure:
 /// layer 1: x86_64-macos.10 x86_64-macos.11 x86_64-macos.12 aarch64-macos.11 aarch64-macos.12
 /// layer 2: any-macos.10 any-macos.11 any-macos.12
@@ -337,17 +402,12 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
 /// layer consists of headers common to all libc headers.
 fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
     if (args.len < 1) {
-        try io.getStdErr().writeAll("fatal: no destination path specified");
-        process.exit(1);
+        fatal(allocator, "no destination path specified", .{});
     }
 
     const dest_path = args[0];
     var dest_dir = fs.cwd().makeOpenPath(dest_path, .{}) catch |err| switch (err) {
-        error.NotDir => {
-            const msg = try std.fmt.allocPrint(allocator, "fatal: path '{s}' not a directory", .{dest_path});
-            try io.getStdErr().writeAll(msg);
-            process.exit(1);
-        },
+        error.NotDir => fatal(allocator, "path '{s}' not a directory", .{dest_path}),
         else => return err,
     };
     defer dest_dir.close();
