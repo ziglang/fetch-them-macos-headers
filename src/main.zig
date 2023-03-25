@@ -167,11 +167,11 @@ fn generateDontDedupMap(arena: Allocator) !std.StringHashMap(void) {
 
 const usage =
     \\fetch_them_macos_headers fetch
-    \\fetch_them_macos_headers generate
+    \\fetch_them_macos_headers dedup
     \\
     \\Commands:
     \\  fetch         Fetch libc headers into headers/<arch>-macos.<os_ver> dir
-    \\  generate      Generate deduplicated dirs into a given <destination> path
+    \\  dedup         Generate deduplicated dirs into a given <destination> path
     \\
     \\General Options:
     \\-h, --help                    Print this help and exit
@@ -180,10 +180,10 @@ const usage =
 const hint =
     \\Try:
     \\1. Add missing libc headers to src/headers.c
-    \\2. Fetch them:
+    \\2. Fetch headers:
     \\   ./zig-out/bin/fetch_them_macos_headers fetch --sysroot <path>
     \\3. Generate deduplicated headers dirs in <destination> path:
-    \\   ./zig-out/bin/fetch_them_macos_headers generate <destination>
+    \\   ./zig-out/bin/fetch_them_macos_headers dedup <destination>
     \\
     \\See -h/--help for more info.
 ;
@@ -199,10 +199,10 @@ pub fn main() anyerror!void {
     const cmd = args[0];
     if (mem.eql(u8, cmd, "--help") or mem.eql(u8, cmd, "-h")) {
         return info(usage, .{});
-    } else if (mem.eql(u8, cmd, "generate")) {
-        return generateDedupDirs(arena.allocator(), args[1..]);
+    } else if (mem.eql(u8, cmd, "dedup")) {
+        return dedup(arena.allocator(), args[1..]);
     } else if (mem.eql(u8, cmd, "fetch")) {
-        return fetchHeaders(arena.allocator(), args[1..]);
+        return fetch(arena.allocator(), args[1..]);
     } else fatal("unknown command or option: {s}", .{cmd});
 }
 
@@ -246,7 +246,7 @@ const fetch_usage =
     \\-h, --help                    Print this help and exit
 ;
 
-fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
+fn fetch(arena: Allocator, args: []const []const u8) !void {
     var argv = std.ArrayList([]const u8).init(arena);
     var sysroot: ?[]const u8 = null;
 
@@ -302,11 +302,11 @@ fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
             .arch = arch,
             .os_ver = os_ver,
         };
-        try fetchHeadersTarget(arena, argv.items, sysroot_path, target, version, tmp);
+        try fetchTarget(arena, argv.items, sysroot_path, target, version, tmp);
     }
 }
 
-fn fetchHeadersTarget(
+fn fetchTarget(
     arena: Allocator,
     args: []const []const u8,
     sysroot: []const u8,
@@ -411,7 +411,7 @@ fn fetchHeadersTarget(
 }
 
 const dedup_usage =
-    \\fetch_them_macos_headers generate [path]
+    \\fetch_them_macos_headers dedup [path]
     \\
     \\General Options:
     \\-h, --help                    Print this help and exit
@@ -425,7 +425,7 @@ const dedup_usage =
 /// The first layer consists of headers specific to a CPU architecture AND macOS version. The second
 /// layer consists of headers common to a macOS version across CPU architectures, and the final
 /// layer consists of headers common to all libc headers.
-fn generateDedupDirs(arena: Allocator, args: []const []const u8) !void {
+fn dedup(arena: Allocator, args: []const []const u8) !void {
     var path: ?[]const u8 = null;
     var args_iter = ArgsIterator{ .args = args };
     while (args_iter.next()) |arg| {
