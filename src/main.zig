@@ -253,11 +253,14 @@ fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
         } else try argv.append(arg);
     }
 
-    if (sysroot == null) {
-        fatal("no sysroot specified", .{});
-    }
+    const sysroot_path = sysroot orelse blk: {
+        const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
+        const detected_sysroot = std.zig.system.darwin.getDarwinSDK(arena, target_info.target) orelse
+            fatal("no SDK found; you can provide one explicitly with '--sysroot' flag", .{});
+        break :blk detected_sysroot.path;
+    };
 
-    var sdk_dir = try std.fs.cwd().openDir(sysroot.?, .{});
+    var sdk_dir = try std.fs.cwd().openDir(sysroot_path, .{});
     defer sdk_dir.close();
     const sdk_info = try sdk_dir.readFileAlloc(arena, "SDKSettings.json", std.math.maxInt(u32));
 
@@ -293,7 +296,7 @@ fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
             .arch = arch,
             .os_ver = os_ver,
         };
-        try fetchHeadersTarget(arena, argv.items, sysroot.?, target, version, tmp);
+        try fetchHeadersTarget(arena, argv.items, sysroot_path, target, version, tmp);
     }
 }
 
