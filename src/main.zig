@@ -166,8 +166,8 @@ fn generateDontDedupMap(arena: Allocator) !std.StringHashMap(void) {
 }
 
 const usage =
-    \\Usage: fetch_them_macos_headers fetch
-    \\       fetch_them_macos_headers generate
+    \\fetch_them_macos_headers fetch
+    \\fetch_them_macos_headers generate
     \\
     \\Commands:
     \\  fetch         Fetch libc headers into headers/<arch>-macos.<os_ver> dir
@@ -191,37 +191,19 @@ const hint =
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    const args = try std.process.argsAlloc(arena.allocator());
-    return mainArgs(arena.allocator(), args);
-}
 
-fn mainArgs(arena: Allocator, all_args: []const []const u8) !void {
+    const all_args = try std.process.argsAlloc(arena.allocator());
     const args = all_args[1..];
-    if (args.len == 0) {
-        fatal("no command or option specified", .{});
-    }
+    if (args.len == 0) fatal("no command or option specified", .{});
 
-    const first_arg = args[0];
-    if (mem.eql(u8, first_arg, "--help") or mem.eql(u8, first_arg, "-h")) {
-        try io.getStdOut().writeAll(usage);
-        return;
-    } else if (mem.eql(u8, first_arg, "generate")) {
-        return generateDedupDirs(arena, args[1..]);
-    } else if (mem.eql(u8, first_arg, "fetch")) {
-        return fetchHeaders(arena, args[1..]);
-    } else fatal("unknown command or option: {s}", .{first_arg});
-}
-
-fn info(comptime format: []const u8, args: anytype) void {
-    std.debug.print("info: " ++ format ++ "\n", args);
-}
-
-fn fatal(comptime format: []const u8, args: anytype) noreturn {
-    ret: {
-        const msg = std.fmt.allocPrint(gpa, "fatal: " ++ format ++ "\n", args) catch break :ret;
-        std.io.getStdErr().writeAll(msg) catch {};
-    }
-    std.process.exit(1);
+    const cmd = args[0];
+    if (mem.eql(u8, cmd, "--help") or mem.eql(u8, cmd, "-h")) {
+        return info(usage, .{});
+    } else if (mem.eql(u8, cmd, "generate")) {
+        return generateDedupDirs(arena.allocator(), args[1..]);
+    } else if (mem.eql(u8, cmd, "fetch")) {
+        return fetchHeaders(arena.allocator(), args[1..]);
+    } else fatal("unknown command or option: {s}", .{cmd});
 }
 
 const ArgsIterator = struct {
@@ -242,13 +224,37 @@ const ArgsIterator = struct {
     }
 };
 
+fn info(comptime format: []const u8, args: anytype) void {
+    std.debug.print("info: " ++ format ++ "\n", args);
+}
+
+fn fatal(comptime format: []const u8, args: anytype) noreturn {
+    ret: {
+        const msg = std.fmt.allocPrint(gpa, "fatal: " ++ format ++ "\n", args) catch break :ret;
+        std.io.getStdErr().writeAll(msg) catch {};
+    }
+    std.process.exit(1);
+}
+
+const fetch_usage =
+    \\fetch_them_macos_headers fetch
+    \\
+    \\Options:
+    \\  --sysroot     Path to macOS SDK
+    \\
+    \\General Options:
+    \\-h, --help                    Print this help and exit
+;
+
 fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
     var argv = std.ArrayList([]const u8).init(arena);
     var sysroot: ?[]const u8 = null;
 
     var args_iter = ArgsIterator{ .args = args };
     while (args_iter.next()) |arg| {
-        if (mem.eql(u8, arg, "--sysroot")) {
+        if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
+            return info(fetch_usage, .{});
+        } else if (mem.eql(u8, arg, "--sysroot")) {
             sysroot = args_iter.nextOrFatal();
         } else try argv.append(arg);
     }
@@ -300,9 +306,6 @@ fn fetchHeaders(arena: Allocator, args: []const []const u8) !void {
     }
 }
 
-const tmp_filename = "headers";
-const headers_list_filename = "headers.o.d";
-
 fn fetchHeadersTarget(
     arena: Allocator,
     args: []const []const u8,
@@ -311,6 +314,8 @@ fn fetchHeadersTarget(
     ver: std.builtin.Version,
     tmp: std.testing.TmpDir,
 ) !void {
+    const tmp_filename = "headers";
+    const headers_list_filename = "headers.o.d";
     const tmp_path = try tmp.dir.realpathAlloc(arena, ".");
     const tmp_file_path = try fs.path.join(arena, &[_][]const u8{ tmp_path, tmp_filename });
     const headers_list_path = try fs.path.join(arena, &[_][]const u8{ tmp_path, headers_list_filename });
@@ -405,6 +410,13 @@ fn fetchHeadersTarget(
     }
 }
 
+const dedup_usage =
+    \\fetch_them_macos_headers generate [path]
+    \\
+    \\General Options:
+    \\-h, --help                    Print this help and exit
+;
+
 /// Dedups libs headers assuming the following layered structure:
 /// layer 1: x86_64-macos.10 x86_64-macos.11 x86_64-macos.12 aarch64-macos.11 aarch64-macos.12
 /// layer 2: any-macos.10 any-macos.11 any-macos.12
@@ -414,11 +426,18 @@ fn fetchHeadersTarget(
 /// layer consists of headers common to a macOS version across CPU architectures, and the final
 /// layer consists of headers common to all libc headers.
 fn generateDedupDirs(arena: Allocator, args: []const []const u8) !void {
-    if (args.len < 1) {
-        fatal("no destination path specified", .{});
+    var path: ?[]const u8 = null;
+    var args_iter = ArgsIterator{ .args = args };
+    while (args_iter.next()) |arg| {
+        if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
+            return info(dedup_usage, .{});
+        } else {
+            if (path != null) fatal("too many arguments", .{});
+            path = arg;
+        }
     }
 
-    const dest_path = args[0];
+    const dest_path = path orelse fatal("no destination path specified", .{});
     var dest_dir = fs.cwd().makeOpenPath(dest_path, .{}) catch |err| switch (err) {
         error.NotDir => fatal("path '{s}' not a directory", .{dest_path}),
         else => return err,
