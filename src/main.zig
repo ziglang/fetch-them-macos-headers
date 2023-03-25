@@ -177,17 +177,6 @@ const usage =
     \\-h, --help                    Print this help and exit
 ;
 
-const hint =
-    \\Try:
-    \\1. Add missing libc headers to src/headers.c
-    \\2. Fetch headers:
-    \\   ./zig-out/bin/fetch_them_macos_headers fetch --sysroot <path>
-    \\3. Generate deduplicated headers dirs in <destination> path:
-    \\   ./zig-out/bin/fetch_them_macos_headers dedup <destination>
-    \\
-    \\See -h/--help for more info.
-;
-
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
