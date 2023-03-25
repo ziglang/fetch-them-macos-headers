@@ -1,6 +1,6 @@
 # fetch-them-macos-headers
 
-This is a small utility that can be used to fetch and generate deduplicated macOS libc headers. The intention for
+This is a small utility repo that can be used to fetch and generate deduplicated macOS libc headers. The intention for
 this utility is to use it to update the libc headers shipped with [Zig], and used when cross-compiling to macOS
 (see [this article] for an amazing description of the `zig cc` C compiler frontend).
 
@@ -9,21 +9,30 @@ this utility is to use it to update the libc headers shipped with [Zig], and use
 
 ## Howto
 
-**NOTE: it makes little sense running this utility on a non-macOS host.**
-
 1. Build
 
 ```
-zig build
+$ zig build
 ```
 
 2. (Optional) Add additional libc headers to `src/headers.c`.
 
-3. Fetch headers into `libc/include/<arch>-macos-gnu`
+3. Fetch headers into `libc/include/`. The `fetch` command will automatically fetch for both `x86_64` and `aarch64`
+   architectures by default.
 
-```
-./zig-out/bin/fetch_them_macos_headers fetch
-```
+    3.1. Fetch from the system-wide, latest SDK.
+    
+    ```
+    $ ./zig-out/bin/fetch_them_macos_headers fetch
+    ```
+
+    3.2. (Optional) Fetch from a custom SDK by explicitly specifying sysroot path.
+    
+    ```
+    $ ./zig-out/bin/fetch_them_macos_headers fetch --sysroot <path>
+    ```
+
+    See [Getting older SDKs](#getting-older-sdks) for a guide of how to install additional SDKs for older versions of macOS.
 
 4. Generate deduplicated headers dirs in `<destination>` path
 
@@ -34,17 +43,22 @@ zig build
 5. (Optional) Copy the contents of `<destination>` into Zig's `lib/libc/include/`, and analyze the changes with
    `git status`.
 
-## Usage
+## Getting older SDKs
 
-```
-Usage: fetch_them_macos_headers fetch [cflags]
-       fetch_them_macos_headers generate <destination>
+Thanks to Rasmus Andersson's amazing work on [`llvmbox`](https://github.com/rsms/llvmbox) it is now possible to
+download additional, older SDKs on your main Mac, extract them without having to install them, and use the extracted SDKs
+with `fetch_them_macos_headers`.
 
-Commands:
-  fetch [cflags]              Fetch libc headers into libc/include/<arch>-macos-gnu dir
-  generate <destination>      Generate deduplicated dirs { aarch64-macos-none, x86_64-macos-none, any-macos-any }
-                              into a given <destination> path
+How does it work?
 
-General Options:
--h, --help                    Print this help and exit
-```
+1. Navigate to [Apple's developer portal](https://developer.apple.com/download/all/?q=command%20line) and pick Command Line Tools installers of interest.
+2. Mount all of them.
+3. Run `unpack_sdks.sh` script.
+
+  ```
+  $ ./unpack_sdks.sh .
+  ```
+  Note that you need `pbzx` in your PATH which you can get via `brew install pbzx` or build from source.
+
+4. You can now pass use the extracted SDKs with `fetch_them_macos_headers` which you will find in `./apple-clts`
+  unless you used a different argument to `unpack_sdks.sh`.

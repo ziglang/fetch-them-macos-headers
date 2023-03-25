@@ -11,18 +11,13 @@ const Allocator = mem.Allocator;
 const Blake3 = std.crypto.hash.Blake3;
 const OsTag = std.Target.Os.Tag;
 
+var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+const gpa = general_purpose_allocator.allocator();
+
 const Arch = enum {
     any,
     aarch64,
     x86_64,
-
-    fn fromTargetCpuArch(arch: std.Target.Cpu.Arch) Arch {
-        return switch (arch) {
-            .aarch64 => .aarch64,
-            .x86_64 => .x86_64,
-            else => unreachable,
-        };
-    }
 };
 
 const Abi = enum { any, none };
@@ -73,22 +68,6 @@ const Target = struct {
             @enumToInt(self.os_ver),
             @tagName(self.abi),
         });
-    }
-
-    fn fromStdTarget(std_target: std.Target) Target {
-        const ver = std_target.os.version_range.semver;
-        assert(ver.min.major == ver.max.major and ver.min.minor == ver.max.minor and ver.min.patch == ver.max.patch);
-        const os_ver: OsVer = switch (ver.max.major) {
-            10 => .catalina,
-            11 => .big_sur,
-            12 => .monterey,
-            13 => .ventura,
-            else => unreachable,
-        };
-        return .{
-            .arch = Arch.fromTargetCpuArch(std_target.cpu.arch),
-            .os_ver = os_ver,
-        };
     }
 };
 
@@ -177,9 +156,8 @@ const dont_dedup_list = &[_][]const u8{
     "libkern/OSAtomicQueue.h",
 };
 
-fn generateDontDedupMap(allocator: Allocator) !std.StringHashMap(void) {
-    var map = std.StringHashMap(void).init(allocator);
-    errdefer map.deinit();
+fn generateDontDedupMap(arena: Allocator) !std.StringHashMap(void) {
+    var map = std.StringHashMap(void).init(arena);
     try map.ensureTotalCapacity(dont_dedup_list.len);
     for (dont_dedup_list) |path| {
         map.putAssumeCapacityNoClobber(path, {});
@@ -188,66 +166,169 @@ fn generateDontDedupMap(allocator: Allocator) !std.StringHashMap(void) {
 }
 
 const usage =
-    \\Usage: fetch_them_macos_headers fetch [cflags]
-    \\       fetch_them_macos_headers generate <destination>
+    \\fetch_them_macos_headers fetch
+    \\fetch_them_macos_headers dedup
     \\
     \\Commands:
-    \\  fetch [cflags]              Fetch libc headers into headers/<arch>-macos.<os_ver> dir
-    \\  generate <destination>      Generate deduplicated dirs such as { aarch64-macos.11-none, x86_64-macos.11-none, any-macos.11-any }
-    \\                              into a given <destination> path
+    \\  fetch         Fetch libc headers into headers/<arch>-macos.<os_ver> dir
+    \\  dedup         Generate deduplicated dirs into a given <destination> path
     \\
     \\General Options:
     \\-h, --help                    Print this help and exit
 ;
 
-const hint =
-    \\Try:
-    \\1. Add missing libc headers to src/headers.c
-    \\2. Fetch them:
-    \\   ./zig-out/bin/fetch_them_macos_headers fetch
-    \\3. Generate deduplicated headers dirs in <destination> path:
-    \\   ./zig-out/bin/fetch_them_macos_headers generate <destination>
-    \\
-    \\See -h/--help for more info.
-;
+pub fn main() anyerror!void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
 
-fn mainArgs(allocator: Allocator, all_args: []const []const u8) !void {
+    const all_args = try std.process.argsAlloc(arena.allocator());
     const args = all_args[1..];
-    if (args.len == 0) {
-        try io.getStdErr().writeAll("fatal: no command or option specified\n\n");
-        try io.getStdOut().writeAll(hint);
-        return;
-    }
+    if (args.len == 0) fatal("no command or option specified", .{});
 
-    const first_arg = args[0];
-    if (mem.eql(u8, first_arg, "--help") or mem.eql(u8, first_arg, "-h")) {
-        try io.getStdOut().writeAll(usage);
-        return;
-    } else if (mem.eql(u8, first_arg, "generate")) {
-        return generateDedupDirs(allocator, args[1..]);
-    } else if (mem.eql(u8, first_arg, "fetch")) {
-        return fetchHeaders(allocator, args[1..]);
-    } else {
-        const msg = try std.fmt.allocPrint(allocator, "fatal: unknown command or option: {s}", .{first_arg});
-        try io.getStdErr().writeAll(msg);
-        return;
-    }
+    const cmd = args[0];
+    if (mem.eql(u8, cmd, "--help") or mem.eql(u8, cmd, "-h")) {
+        return info(usage, .{});
+    } else if (mem.eql(u8, cmd, "dedup")) {
+        return dedup(arena.allocator(), args[1..]);
+    } else if (mem.eql(u8, cmd, "fetch")) {
+        return fetch(arena.allocator(), args[1..]);
+    } else fatal("unknown command or option: {s}", .{cmd});
 }
 
-fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
+const ArgsIterator = struct {
+    args: []const []const u8,
+    i: usize = 0,
+
+    fn next(it: *@This()) ?[]const u8 {
+        if (it.i >= it.args.len) {
+            return null;
+        }
+        defer it.i += 1;
+        return it.args[it.i];
+    }
+
+    fn nextOrFatal(it: *@This()) []const u8 {
+        const arg = it.next() orelse fatal("expected parameter after '{s}'", .{it.args[it.i - 1]});
+        return arg;
+    }
+};
+
+fn info(comptime format: []const u8, args: anytype) void {
+    const msg = std.fmt.allocPrint(gpa, "info: " ++ format ++ "\n", args) catch return;
+    std.io.getStdOut().writeAll(msg) catch {};
+}
+
+fn fatal(comptime format: []const u8, args: anytype) noreturn {
+    ret: {
+        const msg = std.fmt.allocPrint(gpa, "fatal: " ++ format ++ "\n", args) catch break :ret;
+        std.io.getStdErr().writeAll(msg) catch {};
+    }
+    std.process.exit(1);
+}
+
+const fetch_usage =
+    \\fetch_them_macos_headers fetch
+    \\
+    \\Options:
+    \\  --sysroot     Path to macOS SDK
+    \\
+    \\General Options:
+    \\-h, --help                    Print this help and exit
+;
+
+fn fetch(arena: Allocator, args: []const []const u8) !void {
+    var argv = std.ArrayList([]const u8).init(arena);
+    var sysroot: ?[]const u8 = null;
+
+    var args_iter = ArgsIterator{ .args = args };
+    while (args_iter.next()) |arg| {
+        if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
+            return info(fetch_usage, .{});
+        } else if (mem.eql(u8, arg, "--sysroot")) {
+            sysroot = args_iter.nextOrFatal();
+        } else try argv.append(arg);
+    }
+
+    const sysroot_path = sysroot orelse blk: {
+        const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
+        const detected_sysroot = std.zig.system.darwin.getDarwinSDK(arena, target_info.target) orelse
+            fatal("no SDK found; you can provide one explicitly with '--sysroot' flag", .{});
+        break :blk detected_sysroot.path;
+    };
+
+    var sdk_dir = try std.fs.cwd().openDir(sysroot_path, .{});
+    defer sdk_dir.close();
+    const sdk_info = try sdk_dir.readFileAlloc(arena, "SDKSettings.json", std.math.maxInt(u32));
+
+    var parser = std.json.TokenStream.init(sdk_info);
+    const value = try std.json.parse(struct {
+        DefaultProperties: struct {
+            MACOSX_DEPLOYMENT_TARGET: []const u8,
+        },
+    }, &parser, .{
+        .allocator = arena,
+        .ignore_unknown_fields = true,
+    });
+
+    const version = try std.builtin.Version.parse(value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET);
+    const os_ver: OsVer = switch (version.major) {
+        10 => .catalina,
+        11 => .big_sur,
+        12 => .monterey,
+        13 => .ventura,
+        else => unreachable,
+    };
+    info("found SDK deployment target {d}.{d} => {s}", .{
+        version.major,
+        version.minor,
+        @tagName(os_ver),
+    });
+
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    for (&[_]Arch{ .aarch64, .x86_64 }) |arch| {
+        const target: Target = .{
+            .arch = arch,
+            .os_ver = os_ver,
+        };
+        try fetchTarget(arena, argv.items, sysroot_path, target, version, tmp);
+    }
+}
+
+fn fetchTarget(
+    arena: Allocator,
+    args: []const []const u8,
+    sysroot: []const u8,
+    target: Target,
+    ver: std.builtin.Version,
+    tmp: std.testing.TmpDir,
+) !void {
     const tmp_filename = "headers";
-    const tmp_file_path = try fs.path.join(allocator, &[_][]const u8{ tmp_path, tmp_filename });
-
     const headers_list_filename = "headers.o.d";
-    const headers_list_path = try fs.path.join(allocator, &[_][]const u8{ tmp_path, headers_list_filename });
+    const tmp_path = try tmp.dir.realpathAlloc(arena, ".");
+    const tmp_file_path = try fs.path.join(arena, &[_][]const u8{ tmp_path, tmp_filename });
+    const headers_list_path = try fs.path.join(arena, &[_][]const u8{ tmp_path, headers_list_filename });
 
-    var argv = std.ArrayList([]const u8).init(allocator);
-    try argv.appendSlice(&[_][]const u8{
+    const macos_version = try std.fmt.allocPrint(arena, "-mmacosx-version-min={d}.{d}", .{
+        ver.major,
+        ver.minor,
+    });
+
+    var cc_argv = std.ArrayList([]const u8).init(arena);
+    try cc_argv.appendSlice(&[_][]const u8{
         "cc",
+        "-arch",
+        switch (target.arch) {
+            .x86_64 => "x86_64",
+            .aarch64 => "arm64",
+            else => unreachable,
+        },
+        macos_version,
+        "-isysroot",
+        sysroot,
+        "-iwithsysroot",
+        "/usr/include",
         "-o",
         tmp_file_path,
         "src/headers.c",
@@ -256,13 +337,13 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
         "-MF",
         headers_list_path,
     });
-    try argv.appendSlice(args);
+    try cc_argv.appendSlice(args);
 
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
     const res = try std.ChildProcess.exec(.{
-        .allocator = allocator,
-        .argv = argv.items,
+        .allocator = arena,
+        .argv = cc_argv.items,
     });
 
     if (res.stderr.len != 0) {
@@ -274,29 +355,23 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     defer headers_list_file.close();
 
     var headers_dir = fs.cwd().openDir(headers_source_prefix, .{}) catch |err| switch (err) {
-        error.FileNotFound, error.NotDir => {
-            const msg = try std.fmt.allocPrint(
-                allocator,
-                "fatal: path '{s}' not found or not a directory. Did you accidentally delete it?",
-                .{headers_source_prefix},
-            );
-            try io.getStdErr().writeAll(msg);
-            process.exit(1);
-        },
+        error.FileNotFound,
+        error.NotDir,
+        => fatal("path '{s}' not found or not a directory. Did you accidentally delete it?", .{
+            headers_source_prefix,
+        }),
         else => return err,
     };
     defer headers_dir.close();
 
-    const dest_target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-    const dest_target = Target.fromStdTarget(dest_target_info.target);
-    const dest_path = try dest_target.fullName(allocator);
+    const dest_path = try target.fullName(arena);
     try headers_dir.deleteTree(dest_path);
 
     var dest_dir = try headers_dir.makeOpenPath(dest_path, .{});
-    var dirs = std.StringHashMap(fs.Dir).init(allocator);
+    var dirs = std.StringHashMap(fs.Dir).init(arena);
     try dirs.putNoClobber(".", dest_dir);
 
-    const headers_list_str = try headers_list_file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    const headers_list_str = try headers_list_file.reader().readAllAlloc(arena, std.math.maxInt(usize));
     const prefix = "/usr/include";
 
     var it = mem.split(u8, headers_list_str, "\n");
@@ -327,6 +402,13 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
     }
 }
 
+const dedup_usage =
+    \\fetch_them_macos_headers dedup [path]
+    \\
+    \\General Options:
+    \\-h, --help                    Print this help and exit
+;
+
 /// Dedups libs headers assuming the following layered structure:
 /// layer 1: x86_64-macos.10 x86_64-macos.11 x86_64-macos.12 aarch64-macos.11 aarch64-macos.12
 /// layer 2: any-macos.10 any-macos.11 any-macos.12
@@ -335,32 +417,30 @@ fn fetchHeaders(allocator: Allocator, args: []const []const u8) !void {
 /// The first layer consists of headers specific to a CPU architecture AND macOS version. The second
 /// layer consists of headers common to a macOS version across CPU architectures, and the final
 /// layer consists of headers common to all libc headers.
-fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
-    if (args.len < 1) {
-        try io.getStdErr().writeAll("fatal: no destination path specified");
-        process.exit(1);
+fn dedup(arena: Allocator, args: []const []const u8) !void {
+    var path: ?[]const u8 = null;
+    var args_iter = ArgsIterator{ .args = args };
+    while (args_iter.next()) |arg| {
+        if (mem.eql(u8, arg, "--help") or mem.eql(u8, arg, "-h")) {
+            return info(dedup_usage, .{});
+        } else {
+            if (path != null) fatal("too many arguments", .{});
+            path = arg;
+        }
     }
 
-    const dest_path = args[0];
+    const dest_path = path orelse fatal("no destination path specified", .{});
     var dest_dir = fs.cwd().makeOpenPath(dest_path, .{}) catch |err| switch (err) {
-        error.NotDir => {
-            const msg = try std.fmt.allocPrint(allocator, "fatal: path '{s}' not a directory", .{dest_path});
-            try io.getStdErr().writeAll(msg);
-            process.exit(1);
-        },
+        error.NotDir => fatal("path '{s}' not a directory", .{dest_path}),
         else => return err,
     };
     defer dest_dir.close();
 
-    var dont_dedup_map = try generateDontDedupMap(allocator);
-    defer dont_dedup_map.deinit();
-
-    var layer_2_targets = std.ArrayList(TargetWithPrefix).init(allocator);
-    defer layer_2_targets.deinit();
+    var dont_dedup_map = try generateDontDedupMap(arena);
+    var layer_2_targets = std.ArrayList(TargetWithPrefix).init(arena);
 
     for (&[_]OsVer{ .catalina, .big_sur, .monterey, .ventura }) |os_ver| {
-        var layer_1_targets = std.ArrayList(TargetWithPrefix).init(allocator);
-        defer layer_1_targets.deinit();
+        var layer_1_targets = std.ArrayList(TargetWithPrefix).init(arena);
 
         for (targets) |target| {
             if (target.os_ver != os_ver) continue;
@@ -375,7 +455,7 @@ fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
             continue;
         }
 
-        const layer_2_target = try dedupDirs(allocator, .{
+        const layer_2_target = try dedupDirs(arena, .{
             .os_ver = os_ver,
             .dest_path = dest_path,
             .dest_dir = dest_dir,
@@ -385,7 +465,7 @@ fn generateDedupDirs(allocator: Allocator, args: []const []const u8) !void {
         try layer_2_targets.append(layer_2_target);
     }
 
-    const layer_3_target = try dedupDirs(allocator, .{
+    const layer_3_target = try dedupDirs(arena, .{
         .os_ver = .any,
         .dest_path = dest_path,
         .dest_dir = dest_dir,
@@ -408,21 +488,21 @@ const DedupDirsArgs = struct {
     dont_dedup_map: *const std.StringHashMap(void),
 };
 
-fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
+fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     var tmp = tmpIterableDir(.{});
     defer tmp.cleanup();
 
-    var path_table = PathTable.init(allocator);
-    var hash_to_contents = HashToContents.init(allocator);
+    var path_table = PathTable.init(arena);
+    var hash_to_contents = HashToContents.init(arena);
 
     var savings = FindResult{};
     for (args.targets) |target| {
-        const res = try findDuplicates(target.target, allocator, target.prefix, &path_table, &hash_to_contents);
+        const res = try findDuplicates(target.target, arena, target.prefix, &path_table, &hash_to_contents);
         savings.max_bytes_saved += res.max_bytes_saved;
         savings.total_bytes += res.total_bytes;
     }
 
-    std.log.warn("summary: {} could be reduced to {}", .{
+    info("summary: {} could be reduced to {}", .{
         std.fmt.fmtIntSizeBin(savings.total_bytes),
         std.fmt.fmtIntSizeBin(savings.total_bytes - savings.max_bytes_saved),
     });
@@ -432,7 +512,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
         .abi = .any,
         .os_ver = args.os_ver,
     };
-    const common_name = try output_target.fullName(allocator);
+    const common_name = try output_target.fullName(arena);
 
     var missed_opportunity_bytes: usize = 0;
     // Iterate path_table. For each path, put all the hashes into a list. Sort by hit_count.
@@ -441,7 +521,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     var path_it = path_table.iterator();
     while (path_it.next()) |path_kv| {
         if (!args.dont_dedup_map.contains(path_kv.key_ptr.*)) {
-            var contents_list = std.ArrayList(*Contents).init(allocator);
+            var contents_list = std.ArrayList(*Contents).init(arena);
             {
                 var hash_it = path_kv.value_ptr.*.iterator();
                 while (hash_it.next()) |hash_kv| {
@@ -453,7 +533,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             const best_contents = contents_list.popOrNull().?;
             if (best_contents.hit_count > 1) {
                 // Put it in `any-macos-none`.
-                const full_path = try fs.path.join(allocator, &[_][]const u8{ common_name, path_kv.key_ptr.* });
+                const full_path = try fs.path.join(arena, &[_][]const u8{ common_name, path_kv.key_ptr.* });
                 try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
                 try tmp.iterable_dir.dir.writeFile(full_path, best_contents.bytes);
                 best_contents.is_generic = true;
@@ -461,7 +541,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
                     if (contender.hit_count > 1) {
                         const this_missed_bytes = contender.hit_count * contender.bytes.len;
                         missed_opportunity_bytes += this_missed_bytes;
-                        std.log.warn("Missed opportunity ({}): {s}", .{
+                        info("Missed opportunity ({}): {s}", .{
                             std.fmt.fmtIntSizeBin(this_missed_bytes),
                             path_kv.key_ptr.*,
                         });
@@ -475,15 +555,15 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             if (contents.is_generic) continue;
 
             const target = hash_kv.key_ptr.*;
-            const target_name = try target.fullName(allocator);
-            const full_path = try fs.path.join(allocator, &[_][]const u8{ target_name, path_kv.key_ptr.* });
+            const target_name = try target.fullName(arena);
+            const full_path = try fs.path.join(arena, &[_][]const u8{ target_name, path_kv.key_ptr.* });
             try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
             try tmp.iterable_dir.dir.writeFile(full_path, contents.bytes);
         }
     }
 
     for (args.targets) |target| {
-        const target_name = try target.target.fullName(allocator);
+        const target_name = try target.target.fullName(arena);
         try args.dest_dir.deleteTree(target_name);
     }
     try args.dest_dir.deleteTree(common_name);
@@ -496,9 +576,7 @@ fn dedupDirs(allocator: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
                 const dest_sub_dir = try args.dest_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, dest_sub_dir);
             },
-            else => {
-                std.log.warn("unexpected file format: not a directory: '{s}'", .{entry.name});
-            },
+            else => info("unexpected file format: not a directory: '{s}'", .{entry.name}),
         }
     }
 
@@ -515,16 +593,16 @@ const FindResult = struct {
 
 fn findDuplicates(
     target: Target,
-    allocator: Allocator,
+    arena: Allocator,
     dest_path: []const u8,
     path_table: *PathTable,
     hash_to_contents: *HashToContents,
 ) !FindResult {
     var result = FindResult{};
 
-    const target_name = try target.fullName(allocator);
-    const target_include_dir = try fs.path.join(allocator, &[_][]const u8{ dest_path, target_name });
-    var dir_stack = std.ArrayList([]const u8).init(allocator);
+    const target_name = try target.fullName(arena);
+    const target_include_dir = try fs.path.join(arena, &[_][]const u8{ dest_path, target_name });
+    var dir_stack = std.ArrayList([]const u8).init(arena);
     try dir_stack.append(target_include_dir);
 
     while (dir_stack.popOrNull()) |full_dir_name| {
@@ -538,16 +616,16 @@ fn findDuplicates(
         var dir_it = dir.iterate();
 
         while (try dir_it.next()) |entry| {
-            const full_path = try fs.path.join(allocator, &[_][]const u8{ full_dir_name, entry.name });
+            const full_path = try fs.path.join(arena, &[_][]const u8{ full_dir_name, entry.name });
             switch (entry.kind) {
                 .Directory => try dir_stack.append(full_path),
                 .File => {
-                    const rel_path = try fs.path.relative(allocator, target_include_dir, full_path);
+                    const rel_path = try fs.path.relative(arena, target_include_dir, full_path);
                     const max_size = 2 * 1024 * 1024 * 1024;
-                    const raw_bytes = try fs.cwd().readFileAlloc(allocator, full_path, max_size);
+                    const raw_bytes = try fs.cwd().readFileAlloc(arena, full_path, max_size);
                     const trimmed = mem.trim(u8, raw_bytes, " \r\n\t");
                     result.total_bytes += raw_bytes.len;
-                    const hash = try allocator.alloc(u8, 32);
+                    const hash = try arena.alloc(u8, 32);
                     var hasher = Blake3.init(.{});
                     hasher.update(rel_path);
                     hasher.update(trimmed);
@@ -556,7 +634,7 @@ fn findDuplicates(
                     if (gop.found_existing) {
                         result.max_bytes_saved += raw_bytes.len;
                         gop.value_ptr.hit_count += 1;
-                        std.log.warn("duplicate: {s} {s} ({})", .{
+                        info("duplicate: {s} {s} ({})", .{
                             target_name,
                             rel_path,
                             std.fmt.fmtIntSizeBin(raw_bytes.len),
@@ -571,14 +649,14 @@ fn findDuplicates(
                     }
                     const path_gop = try path_table.getOrPut(rel_path);
                     const target_to_hash = if (path_gop.found_existing) path_gop.value_ptr.* else blk: {
-                        const ptr = try allocator.create(TargetToHash);
-                        ptr.* = TargetToHash.init(allocator);
+                        const ptr = try arena.create(TargetToHash);
+                        ptr.* = TargetToHash.init(arena);
                         path_gop.value_ptr.* = ptr;
                         break :blk ptr;
                     };
                     try target_to_hash.putNoClobber(target, hash);
                 },
-                else => std.log.warn("unexpected file: {s}", .{full_path}),
+                else => info("unexpected file: {s}", .{full_path}),
             }
         }
     }
@@ -610,17 +688,7 @@ fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
                 const ncopied = try source_file.copyRangeAll(0, dest_file, 0, stat.size);
                 assert(ncopied == stat.size);
             },
-            else => |kind| {
-                std.log.warn("unexpected file kind '{s}' will be ignored", .{@tagName(kind)});
-            },
+            else => |kind| info("unexpected file kind '{s}' will be ignored", .{@tagName(kind)}),
         }
     }
-}
-
-pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    return mainArgs(allocator, args);
 }
