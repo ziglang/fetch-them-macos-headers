@@ -214,7 +214,8 @@ const ArgsIterator = struct {
 };
 
 fn info(comptime format: []const u8, args: anytype) void {
-    std.debug.print("info: " ++ format ++ "\n", args);
+    const msg = std.fmt.allocPrint(gpa, "info: " ++ format ++ "\n", args) catch return;
+    std.io.getStdOut().writeAll(msg) catch {};
 }
 
 fn fatal(comptime format: []const u8, args: anytype) noreturn {
