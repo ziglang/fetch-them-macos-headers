@@ -99,6 +99,7 @@
 #include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <sys/timex.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/un.h>
