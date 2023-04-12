@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fenv.h>
 #include <float.h>
+#include <getopt.h>
 #include <inttypes.h>
 #include <iso646.h>
 #include <limits.h>
