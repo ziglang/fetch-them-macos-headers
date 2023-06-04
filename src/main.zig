@@ -260,15 +260,9 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
     defer sdk_dir.close();
     const sdk_info = try sdk_dir.readFileAlloc(arena, "SDKSettings.json", std.math.maxInt(u32));
 
-    var parser = std.json.TokenStream.init(sdk_info);
-    const value = try std.json.parse(struct {
-        DefaultProperties: struct {
-            MACOSX_DEPLOYMENT_TARGET: []const u8,
-        },
-    }, &parser, .{
-        .allocator = arena,
-        .ignore_unknown_fields = true,
-    });
+    const value = try std.json.parseFromSlice(struct {
+        DefaultProperties: struct { MACOSX_DEPLOYMENT_TARGET: []const u8 },
+    }, arena, sdk_info, .{ .ignore_unknown_fields = true });
 
     const version = try std.builtin.Version.parse(value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET);
     const os_ver: OsVer = switch (version.major) {
@@ -529,7 +523,7 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
                     try contents_list.append(contents);
                 }
             }
-            std.sort.sort(*Contents, contents_list.items, {}, Contents.hitCountLessThan);
+            std.mem.sort(*Contents, contents_list.items, {}, Contents.hitCountLessThan);
             const best_contents = contents_list.popOrNull().?;
             if (best_contents.hit_count > 1) {
                 // Put it in `any-macos-none`.
@@ -571,7 +565,7 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     var tmp_it = tmp.iterable_dir.iterate();
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
-            .Directory => {
+            .directory => {
                 const sub_dir = try tmp.iterable_dir.dir.openIterableDir(entry.name, .{});
                 const dest_sub_dir = try args.dest_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, dest_sub_dir);
@@ -618,8 +612,8 @@ fn findDuplicates(
         while (try dir_it.next()) |entry| {
             const full_path = try fs.path.join(arena, &[_][]const u8{ full_dir_name, entry.name });
             switch (entry.kind) {
-                .Directory => try dir_stack.append(full_path),
-                .File => {
+                .directory => try dir_stack.append(full_path),
+                .file => {
                     const rel_path = try fs.path.relative(arena, target_include_dir, full_path);
                     const max_size = 2 * 1024 * 1024 * 1024;
                     const raw_bytes = try fs.cwd().readFileAlloc(arena, full_path, max_size);
@@ -668,7 +662,7 @@ fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
     var it = source.iterate();
     while (try it.next()) |next| {
         switch (next.kind) {
-            .Directory => {
+            .directory => {
                 var sub_dir = try dest.makeOpenPath(next.name, .{});
                 var sub_source = try source.dir.openIterableDir(next.name, .{});
                 defer {
@@ -677,7 +671,7 @@ fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
                 }
                 try copyDirAll(sub_source, sub_dir);
             },
-            .File => {
+            .file => {
                 var source_file = try source.dir.openFile(next.name, .{});
                 var dest_file = try dest.createFile(next.name, .{});
                 defer {
