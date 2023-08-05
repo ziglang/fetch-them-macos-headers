@@ -186,6 +186,7 @@
 #include <objc/objc-runtime.h>
 
 // Depended on by libuv
+#include <paths.h>
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 #include <sys/paths.h>

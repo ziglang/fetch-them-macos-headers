@@ -42,7 +42,7 @@ const Target = struct {
         std.hash.autoHash(&hasher, a.os);
         std.hash.autoHash(&hasher, a.os_ver);
         std.hash.autoHash(&hasher, a.abi);
-        return @truncate(u32, hasher.final());
+        return @truncate(hasher.final());
     }
 
     fn eql(a: Target, b: Target) bool {
@@ -65,7 +65,7 @@ const Target = struct {
         return std.fmt.allocPrint(allocator, "{s}-{s}.{d}-{s}", .{
             @tagName(self.arch),
             @tagName(self.os),
-            @enumToInt(self.os_ver),
+            @intFromEnum(self.os_ver),
             @tagName(self.abi),
         });
     }
@@ -236,6 +236,23 @@ const fetch_usage =
     \\-h, --help                    Print this help and exit
 ;
 
+// Versions reported by Apple aren't exactly semantically valid as they usually omit
+// the patch component. Hence, we do a simple check for the number of components and
+// add the missing patch value if needed.
+fn parseSdkVersion(raw: []const u8) !std.SemanticVersion {
+    var buffer: [128]u8 = undefined;
+    if (raw.len > buffer.len) return error.OutOfMemory;
+    @memcpy(buffer[0..raw.len], raw);
+    const dots_count = mem.count(u8, raw, ".");
+    if (dots_count < 1) return error.InvalidVersion;
+    const len = if (dots_count < 2) blk: {
+        const patch_suffix = ".0";
+        buffer[raw.len..][0..patch_suffix.len].* = patch_suffix.*;
+        break :blk raw.len + patch_suffix.len;
+    } else raw.len;
+    return try std.SemanticVersion.parse(buffer[0..len]);
+}
+
 fn fetch(arena: Allocator, args: []const []const u8) !void {
     var argv = std.ArrayList([]const u8).init(arena);
     var sysroot: ?[]const u8 = null;
@@ -260,11 +277,10 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
     defer sdk_dir.close();
     const sdk_info = try sdk_dir.readFileAlloc(arena, "SDKSettings.json", std.math.maxInt(u32));
 
-    const value = try std.json.parseFromSlice(struct {
+    const result = try std.json.parseFromSlice(struct {
         DefaultProperties: struct { MACOSX_DEPLOYMENT_TARGET: []const u8 },
     }, arena, sdk_info, .{ .ignore_unknown_fields = true });
-
-    const version = try std.builtin.Version.parse(value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET);
+    const version = try parseSdkVersion(result.value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET);
     const os_ver: OsVer = switch (version.major) {
         10 => .catalina,
         11 => .big_sur,
@@ -295,7 +311,7 @@ fn fetchTarget(
     args: []const []const u8,
     sysroot: []const u8,
     target: Target,
-    ver: std.builtin.Version,
+    ver: std.SemanticVersion,
     tmp: std.testing.TmpDir,
 ) !void {
     const tmp_filename = "headers";
