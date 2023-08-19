@@ -42,7 +42,7 @@ const Target = struct {
         std.hash.autoHash(&hasher, a.os);
         std.hash.autoHash(&hasher, a.os_ver);
         std.hash.autoHash(&hasher, a.abi);
-        return @truncate(u32, hasher.final());
+        return @as(u32, @truncate(hasher.final()));
     }
 
     fn eql(a: Target, b: Target) bool {
@@ -65,7 +65,7 @@ const Target = struct {
         return std.fmt.allocPrint(allocator, "{s}-{s}.{d}-{s}", .{
             @tagName(self.arch),
             @tagName(self.os),
-            @enumToInt(self.os_ver),
+            @intFromEnum(self.os_ver),
             @tagName(self.abi),
         });
     }
@@ -251,7 +251,7 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
 
     const sysroot_path = sysroot orelse blk: {
         const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-        const detected_sysroot = std.zig.system.darwin.getDarwinSDK(arena, target_info.target) orelse
+        const detected_sysroot = std.zig.system.darwin.getSdk(arena, target_info.target) orelse
             fatal("no SDK found; you can provide one explicitly with '--sysroot' flag", .{});
         break :blk detected_sysroot.path;
     };
@@ -260,11 +260,14 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
     defer sdk_dir.close();
     const sdk_info = try sdk_dir.readFileAlloc(arena, "SDKSettings.json", std.math.maxInt(u32));
 
-    const value = try std.json.parseFromSlice(struct {
+    const parsed_json = try std.json.parseFromSlice(struct {
         DefaultProperties: struct { MACOSX_DEPLOYMENT_TARGET: []const u8 },
     }, arena, sdk_info, .{ .ignore_unknown_fields = true });
 
-    const version = try std.builtin.Version.parse(value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET);
+    const version = Version.parse(parsed_json.value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET) orelse
+        fatal("don't know how to parse SDK version: {s}", .{
+        parsed_json.value.DefaultProperties.MACOSX_DEPLOYMENT_TARGET,
+    });
     const os_ver: OsVer = switch (version.major) {
         10 => .catalina,
         11 => .big_sur,
@@ -272,11 +275,7 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
         13 => .ventura,
         else => unreachable,
     };
-    info("found SDK deployment target {d}.{d} => {s}", .{
-        version.major,
-        version.minor,
-        @tagName(os_ver),
-    });
+    info("found SDK deployment target macOS {} aka '{s}'", .{ version, @tagName(os_ver) });
 
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
@@ -295,7 +294,7 @@ fn fetchTarget(
     args: []const []const u8,
     sysroot: []const u8,
     target: Target,
-    ver: std.builtin.Version,
+    ver: Version,
     tmp: std.testing.TmpDir,
 ) !void {
     const tmp_filename = "headers";
@@ -686,3 +685,36 @@ fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
         }
     }
 }
+
+const Version = struct {
+    major: u16,
+    minor: u8,
+    patch: u8,
+
+    fn parse(raw: []const u8) ?Version {
+        var parsed: [3]u16 = [_]u16{0} ** 3;
+        var count: usize = 0;
+        var it = std.mem.splitAny(u8, raw, ".");
+        while (it.next()) |comp| {
+            if (count >= 3) return null;
+            parsed[count] = std.fmt.parseInt(u16, comp, 10) catch return null;
+            count += 1;
+        }
+        if (count == 0) return null;
+        const major = parsed[0];
+        const minor = std.math.cast(u8, parsed[1]) orelse return null;
+        const patch = std.math.cast(u8, parsed[2]) orelse return null;
+        return .{ .major = major, .minor = minor, .patch = patch };
+    }
+
+    pub fn format(
+        v: Version,
+        comptime unused_fmt_string: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = unused_fmt_string;
+        _ = options;
+        try writer.print("{d}.{d}.{d}", .{ v.major, v.minor, v.patch });
+    }
+};
