@@ -28,6 +28,7 @@ const OsVer = enum(u32) {
     big_sur = 11,
     monterey = 12,
     ventura = 13,
+    sonoma = 14,
 };
 
 const Target = struct {
@@ -251,9 +252,8 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
 
     const sysroot_path = sysroot orelse blk: {
         const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-        const detected_sysroot = std.zig.system.darwin.getSdk(arena, target_info.target) orelse
+        break :blk std.zig.system.darwin.getSdk(arena, target_info.target) orelse
             fatal("no SDK found; you can provide one explicitly with '--sysroot' flag", .{});
-        break :blk detected_sysroot.path;
     };
 
     var sdk_dir = try std.fs.cwd().openDir(sysroot_path, .{});
@@ -273,6 +273,7 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
         11 => .big_sur,
         12 => .monterey,
         13 => .ventura,
+        14 => .sonoma,
         else => unreachable,
     };
     info("found SDK deployment target macOS {} aka '{s}'", .{ version, @tagName(os_ver) });
