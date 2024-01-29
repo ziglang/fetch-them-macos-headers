@@ -5,7 +5,6 @@ const mem = std.mem;
 const process = std.process;
 const assert = std.debug.assert;
 const tmpDir = std.testing.tmpDir;
-const tmpIterableDir = std.testing.tmpIterableDir;
 
 const Allocator = mem.Allocator;
 const Blake3 = std.crypto.hash.Blake3;
@@ -250,10 +249,9 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
     }
 
     const sysroot_path = sysroot orelse blk: {
-        const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-        const detected_sysroot = std.zig.system.darwin.getSdk(arena, target_info.target) orelse
+        const target = try std.zig.system.resolveTargetQuery(.{});
+        break :blk std.zig.system.darwin.getSdk(arena, target) orelse
             fatal("no SDK found; you can provide one explicitly with '--sysroot' flag", .{});
-        break :blk detected_sysroot.path;
     };
 
     var sdk_dir = try std.fs.cwd().openDir(sysroot_path, .{});
@@ -334,7 +332,7 @@ fn fetchTarget(
 
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
-    const res = try std.ChildProcess.exec(.{
+    const res = try std.ChildProcess.run(.{
         .allocator = arena,
         .argv = cc_argv.items,
     });
@@ -482,7 +480,7 @@ const DedupDirsArgs = struct {
 };
 
 fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
-    var tmp = tmpIterableDir(.{});
+    var tmp = tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
 
     var path_table = PathTable.init(arena);
@@ -527,8 +525,8 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             if (best_contents.hit_count > 1) {
                 // Put it in `any-macos-none`.
                 const full_path = try fs.path.join(arena, &[_][]const u8{ common_name, path_kv.key_ptr.* });
-                try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
-                try tmp.iterable_dir.dir.writeFile(full_path, best_contents.bytes);
+                try tmp.dir.makePath(fs.path.dirname(full_path).?);
+                try tmp.dir.writeFile(full_path, best_contents.bytes);
                 best_contents.is_generic = true;
                 while (contents_list.popOrNull()) |contender| {
                     if (contender.hit_count > 1) {
@@ -550,8 +548,8 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             const target = hash_kv.key_ptr.*;
             const target_name = try target.fullName(arena);
             const full_path = try fs.path.join(arena, &[_][]const u8{ target_name, path_kv.key_ptr.* });
-            try tmp.iterable_dir.dir.makePath(fs.path.dirname(full_path).?);
-            try tmp.iterable_dir.dir.writeFile(full_path, contents.bytes);
+            try tmp.dir.makePath(fs.path.dirname(full_path).?);
+            try tmp.dir.writeFile(full_path, contents.bytes);
         }
     }
 
@@ -561,11 +559,11 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
     }
     try args.dest_dir.deleteTree(common_name);
 
-    var tmp_it = tmp.iterable_dir.iterate();
+    var tmp_it = tmp.dir.iterate();
     while (try tmp_it.next()) |entry| {
         switch (entry.kind) {
             .directory => {
-                const sub_dir = try tmp.iterable_dir.dir.openIterableDir(entry.name, .{});
+                const sub_dir = try tmp.dir.openDir(entry.name, .{ .iterate = true });
                 const dest_sub_dir = try args.dest_dir.makeOpenPath(entry.name, .{});
                 try copyDirAll(sub_dir, dest_sub_dir);
             },
@@ -599,7 +597,7 @@ fn findDuplicates(
     try dir_stack.append(target_include_dir);
 
     while (dir_stack.popOrNull()) |full_dir_name| {
-        var dir = fs.cwd().openIterableDir(full_dir_name, .{}) catch |err| switch (err) {
+        var dir = fs.cwd().openDir(full_dir_name, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound => break,
             error.AccessDenied => break,
             else => return err,
@@ -657,13 +655,13 @@ fn findDuplicates(
     return result;
 }
 
-fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
+fn copyDirAll(source: fs.Dir, dest: fs.Dir) anyerror!void {
     var it = source.iterate();
     while (try it.next()) |next| {
         switch (next.kind) {
             .directory => {
                 var sub_dir = try dest.makeOpenPath(next.name, .{});
-                var sub_source = try source.dir.openIterableDir(next.name, .{});
+                var sub_source = try source.openDir(next.name, .{ .iterate = true });
                 defer {
                     sub_dir.close();
                     sub_source.close();
@@ -671,7 +669,7 @@ fn copyDirAll(source: fs.IterableDir, dest: fs.Dir) anyerror!void {
                 try copyDirAll(sub_source, sub_dir);
             },
             .file => {
-                var source_file = try source.dir.openFile(next.name, .{});
+                var source_file = try source.openFile(next.name, .{});
                 var dest_file = try dest.createFile(next.name, .{});
                 defer {
                     source_file.close();
