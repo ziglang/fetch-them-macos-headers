@@ -34,6 +34,21 @@ $ zig build
 
     See [Getting older SDKs](#getting-older-sdks) for a guide of how to install additional SDKs for older versions of macOS.
 
+4. Merge `x86_64` and `aarch64` into destination path `any-macos-any`
+
+```
+mkdir headers/any-macos-any
+rsync -vaHP headers/aarch64-macos.<VERSION>-none/. headers/any-macos-any/.
+rsync -vaHP headers/x86_64-macos.<VERSION>-none/. headers/any-macos-any/.
+```
+
+5. (Optional) Replace the contents of Zig's `lib/libc/include/any-macos-any` with `headers/any-macos-any`,
+   and analyze the changes with `git status`.
+
+## Deprecated Howto
+
+For the deprecated method, replace steps 4,5 as follows:
+
 4. Generate deduplicated headers dirs in `<destination>` path
 
 ```
