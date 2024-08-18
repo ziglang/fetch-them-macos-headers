@@ -342,7 +342,7 @@ fn fetchTarget(
 
     // TODO instead of calling `cc` as a child process here,
     // hook in directly to `zig cc` API.
-    const res = try std.ChildProcess.run(.{
+    const res = try std.process.Child.run(.{
         .allocator = arena,
         .argv = cc_argv.items,
     });
@@ -536,7 +536,7 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
                 // Put it in `any-macos-none`.
                 const full_path = try fs.path.join(arena, &[_][]const u8{ common_name, path_kv.key_ptr.* });
                 try tmp.dir.makePath(fs.path.dirname(full_path).?);
-                try tmp.dir.writeFile(full_path, best_contents.bytes);
+                try tmp.dir.writeFile(.{ .sub_path = full_path, .data = best_contents.bytes });
                 best_contents.is_generic = true;
                 while (contents_list.popOrNull()) |contender| {
                     if (contender.hit_count > 1) {
@@ -559,7 +559,7 @@ fn dedupDirs(arena: Allocator, args: DedupDirsArgs) !TargetWithPrefix {
             const target_name = try target.fullName(arena);
             const full_path = try fs.path.join(arena, &[_][]const u8{ target_name, path_kv.key_ptr.* });
             try tmp.dir.makePath(fs.path.dirname(full_path).?);
-            try tmp.dir.writeFile(full_path, contents.bytes);
+            try tmp.dir.writeFile(.{ .sub_path = full_path, .data = contents.bytes });
         }
     }
 
