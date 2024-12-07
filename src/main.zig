@@ -375,7 +375,7 @@ fn fetchTarget(
     const headers_list_str = try headers_list_file.reader().readAllAlloc(arena, std.math.maxInt(usize));
     const prefix = "/usr/include";
 
-    var it = mem.split(u8, headers_list_str, "\n");
+    var it = mem.splitScalar(u8, headers_list_str, '\n');
     while (it.next()) |line| {
         if (mem.lastIndexOf(u8, line, "clang") != null) continue;
         if (mem.lastIndexOf(u8, line, prefix[0..])) |idx| {
