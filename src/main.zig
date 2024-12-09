@@ -28,6 +28,7 @@ const OsVer = enum(u32) {
     monterey = 12,
     ventura = 13,
     sonoma = 14,
+    sequoia = 15,
 };
 
 const Target = struct {
@@ -106,6 +107,10 @@ const targets = [_]Target{
         .os_ver = .sonoma,
     },
     Target{
+        .arch = .x86_64,
+        .os_ver = .sequoia,
+    },
+    Target{
         .arch = .aarch64,
         .os_ver = .big_sur,
     },
@@ -120,6 +125,10 @@ const targets = [_]Target{
     Target{
         .arch = .aarch64,
         .os_ver = .sonoma,
+    },
+    Target{
+        .arch = .aarch64,
+        .os_ver = .sequoia,
     },
 };
 
@@ -281,6 +290,7 @@ fn fetch(arena: Allocator, args: []const []const u8) !void {
         12 => .monterey,
         13 => .ventura,
         14 => .sonoma,
+        15 => .sequoia,
         else => unreachable,
     };
     info("found SDK deployment target macOS {} aka '{s}'", .{ version, @tagName(os_ver) });
@@ -440,7 +450,7 @@ fn dedup(arena: Allocator, args: []const []const u8) !void {
     var dont_dedup_map = try generateDontDedupMap(arena);
     var layer_2_targets = std.ArrayList(TargetWithPrefix).init(arena);
 
-    for (&[_]OsVer{ .catalina, .big_sur, .monterey, .ventura, .sonoma }) |os_ver| {
+    for (&[_]OsVer{ .catalina, .big_sur, .monterey, .ventura, .sonoma, .sequoia }) |os_ver| {
         var layer_1_targets = std.ArrayList(TargetWithPrefix).init(arena);
 
         for (targets) |target| {
