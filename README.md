@@ -21,13 +21,13 @@ $ zig build
    architectures by default.
 
     3.1. Fetch from the system-wide, latest SDK.
-    
+
     ```
     $ ./zig-out/bin/fetch_them_macos_headers fetch
     ```
 
     3.2. (Optional) Fetch from a custom SDK by explicitly specifying sysroot path.
-    
+
     ```
     $ ./zig-out/bin/fetch_them_macos_headers fetch --sysroot <path>
     ```
@@ -44,19 +44,6 @@ rsync -vaHP headers/x86_64-macos.<VERSION>-none/. headers/any-macos-any/.
 
 5. (Optional) Replace the contents of Zig's `lib/libc/include/any-macos-any` with `headers/any-macos-any`,
    and analyze the changes with `git status`.
-
-## Deprecated Howto
-
-For the deprecated method, replace steps 4,5 as follows:
-
-4. Generate deduplicated headers dirs in `<destination>` path
-
-```
-./zig-out/bin/fetch_them_macos_headers generate <destination>
-```
-
-5. (Optional) Copy the contents of `<destination>` into Zig's `lib/libc/include/`, and analyze the changes with
-   `git status`.
 
 ## Getting older SDKs
 
