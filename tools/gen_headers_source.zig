@@ -44,7 +44,7 @@ pub fn main() anyerror!void {
 
     if (positionals.items.len != 1) fatal("expected one positional argument: [dir]", .{});
 
-    var dir = try std.fs.cwd().openIterableDir(positionals.items[0], .{ .no_follow = true });
+    var dir = try std.fs.cwd().openDir(positionals.items[0], .{ .no_follow = true });
     defer dir.close();
     var paths = std.ArrayList([]const u8).init(arena);
     try findHeaders(arena, dir, "", &paths);
@@ -72,7 +72,7 @@ pub fn main() anyerror!void {
 
 fn findHeaders(
     arena: Allocator,
-    dir: std.fs.IterableDir,
+    dir: std.fs.Dir,
     prefix: []const u8,
     paths: *std.ArrayList([]const u8),
 ) anyerror!void {
@@ -81,7 +81,7 @@ fn findHeaders(
         switch (entry.kind) {
             .directory => {
                 const path = try std.fs.path.join(arena, &.{ prefix, entry.name });
-                var subdir = try dir.dir.openIterableDir(entry.name, .{ .no_follow = true });
+                var subdir = try dir.openDir(entry.name, .{ .no_follow = true });
                 defer subdir.close();
                 try findHeaders(arena, subdir, path, paths);
             },
